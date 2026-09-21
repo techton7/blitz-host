@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/blitz-host-protocol",
+    "crates/blitz-host-transport",
+    "crates/blitz-host-bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Techton <contact@techton.io>"]
+repository = "https://github.com/techton7/blitz-host"
+homepage = "https://github.com/techton7/blitz-host"
+
+[patch.crates-io]
+blitz-shell = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
+blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
+blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
+blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }

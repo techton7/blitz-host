@@ -1,0 +1,17 @@
+[workspace]
+pr_labels = ["release"]
+allow_dirty = false
+changelog_update = true
+semver_check = false
+
+[[package]]
+name = "blitz-host-protocol"
+version_group = "main"
+
+[[package]]
+name = "blitz-host-transport"
+version_group = "main"
+
+[[package]]
+name = "blitz-host-bridge"
+version_group = "main"
