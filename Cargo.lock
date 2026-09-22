@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blitz-dom",
  "blitz-host-bridge",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-bridge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blitz-dom",
  "blitz-host-protocol",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-transport"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blitz-host-protocol",
  "libc",

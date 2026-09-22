@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/techton7/blitz-host/compare/blitz-host-protocol-v0.1.0...blitz-host-protocol-v0.1.1) - 2026-09-22
+
+### Other
+
+- release v0.1.0 ([#1](https://github.com/techton7/blitz-host/pull/1))
+
 ## [0.1.0](https://github.com/techton7/blitz-host/releases/tag/blitz-host-protocol-v0.1.0) - 2026-09-21
 
 ### Added
