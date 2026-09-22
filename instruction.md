@@ -1,4 +1,4 @@
-# Worker Instruction: Turn the Proven `blitz-host` Spike into a Usable Facade
+# Worker Instruction: Move `blitz-host` Integration Up to the `oxidase` Ecosystem Boundary
 
 You are working in:
 
@@ -6,19 +6,11 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current `blitz-host` spike has already proven the hard technical core:
+The current `blitz-host` spike/facade has proven that local attach, inspect, click, and settle work.
 
-1. attach to a live Blitz window
-2. inspect semantic state
-3. dispatch click
-4. settle
-5. re-inspect changed state
+The next architectural move is now fixed:
 
-So the next task is **not** “add another low-level trick.”
-
-The next task is:
-
-> **make `blitz-host` structurally usable instead of leaving the current proof scattered across low-level crates and manual runner wiring**
+> **`blitz-host` should remain its own project/crate family, but the ergonomic integration point should move up to the `oxidase` ecosystem boundary.**
 
 Write all agent-facing reasoning in English.
 
@@ -35,46 +27,51 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Take the current working spike and refactor it into a cleaner, more usable shape centered on a **single top-level `blitz-host` facade crate**.
+Refactor the integration direction so that:
 
-The main outcomes should be:
+1. `blitz-host` remains structurally separate
+2. `oxidase` becomes the place where the convenience integration is exposed
+3. downstream Dioxus Native / Blitz hosts do **not** need to depend on `blitz-host` directly if they are already choosing the `oxidase` path
+4. `dioxus-native-dom` does **not** directly depend on `blitz-host`
 
-1. a top-level `blitz-host` crate exists
-2. it presents the usable external surface
-3. the CLI binary belongs to that surface
-4. `oxidase-native-runner` no longer needs to wire the low-level `protocol / transport / bridge` crates directly in an ugly ad-hoc way
-5. the current proven behavior still works after the cleanup
+The desired end-state for `oxidase` ecosystem consumers is:
 
-This is a structural cleanup and packaging pass built on top of the already-proven core.
+```toml
+oxidase = { git = "https://github.com/techton7/oxidase.git", tag = "oxidase-vX.Y.Z", features = ["blitz-host"] }
+```
+
+and then ordinary:
+
+```rust
+#[oxidase::main]
+fn main() {
+    dioxus::launch(App);
+}
+```
+
+with runtime activation via:
+
+- `--debug-control`
+- or environment variable equivalent
+
+That is the model this pass should push toward.
 
 ---
 
-## 2. The Problem You Are Solving
+## 2. Critical Architectural Rule
 
-The current spike works, but it has two real structural problems:
+This is the key rule:
 
-### Problem A — the usable surface is fragmented
+> **`dioxus-native-dom` must not grow a direct dependency on `blitz-host`.**
 
-Right now the implementation is spread across:
+If host/runtime convenience glue is needed, it belongs:
 
-1. `blitz-host-protocol`
-2. `blitz-host-transport`
-3. `blitz-host-bridge`
+1. in `oxidase`
+2. or in an `oxidase`-side integration/glue layer
 
-That is a good internal split, but it is not a good top-level user-facing shape by itself.
+but **not** as a direct hard dependency inside `dioxus-native-dom`.
 
-### Problem B — the runner integration is too low-level
-
-Right now `oxidase-native-runner` knows too much about:
-
-1. low-level bridge types
-2. transport startup
-3. static storage / plumbing
-4. manual per-frame servicing details
-
-The proof is valid, but the integration shape is too exposed and too messy.
-
-The job now is to clean that up **without pretending the world is magically zero-wiring for every app**.
+You may rely on `dioxus-native-dom` APIs or add narrowly-scoped upstream-friendly hooks only if absolutely necessary, but do not turn it into a `blitz-host` consumer.
 
 ---
 
@@ -82,171 +79,126 @@ The job now is to clean that up **without pretending the world is magically zero
 
 Unless reinspection disproves them:
 
-1. `blitz-host` already works technically for:
-   - inspect
-   - click
-   - settle
-   - changed-state verification
-2. the current proof is real and must be preserved
-3. the internal 3-way split is still valuable:
-   - `blitz-host-protocol`
-   - `blitz-host-transport`
-   - `blitz-host-bridge`
-4. what is missing is a **clean facade and cleaner host-side integration**
-5. you must not turn this into fiction about official upstream Dioxus or universal automatic injection
+1. `blitz-host` now has:
+   - protocol
+   - transport
+   - bridge
+   - facade crate
+   - working CLI
+   - proven attach / inspect / click / settle flow
+2. The current Dioxus Native host proof still relies on explicit host integration surfaces.
+3. The remaining structural problem is not technical capability, but **where the integration responsibility should live**.
+4. The desired answer is now:
+   - `blitz-host` stays separate
+   - `oxidase` owns the developer-facing convenience layer
 
 ---
 
-## 4. Required Structural Direction
+## 4. Required Direction
 
-### A. Create a top-level facade crate
+### A. Keep `blitz-host` separate
 
-Add a top-level crate:
+Do **not** collapse `blitz-host` into `dioxus-native-dom`.
 
-```text
-util/blitz-host/crates/blitz-host
+Do **not** turn `dioxus-native-dom` into the package that owns this feature.
+
+`blitz-host` remains its own project/crate family.
+
+### B. Move convenience integration up into `oxidase`
+
+Push the integration story so that `oxidase` (or an `oxidase`-side glue surface) becomes the intended ergonomic entrypoint.
+
+That means this pass should work toward:
+
+1. `oxidase` having a feature such as `blitz-host`
+2. `#[oxidase::main]` becoming the natural place where the integration is consumed
+3. runtime `--debug-control` deciding activation
+
+### C. Git/tag dependency story must be real
+
+Do not describe this as path-only local magic.
+
+The intended downstream consumption story must be compatible with a real GitHub dependency/tag lane, for example:
+
+```toml
+oxidase = { git = "https://github.com/techton7/oxidase.git", tag = "oxidase-v0.1.4", features = ["blitz-host"] }
 ```
 
-Its job is to provide the main usable surface.
+or the next correct tag/version if it changes during your work.
 
-At minimum it should:
+The point is:
 
-1. re-export the public parts of:
-   - protocol
-   - transport/client
-   - bridge
-2. own the canonical CLI binary surface
-3. provide a higher-level integration surface for internal hosts/runners
-
-### B. Keep the internal split
-
-Do **not** collapse everything into one file or destroy the internal architecture.
-
-The correct model is:
-
-1. internal implementation remains split
-2. external usability is unified behind `blitz-host`
-
-That is the distinction you are trying to achieve.
+> a downstream host should be able to opt into `blitz-host` ergonomics by opting into `oxidase`, not by directly stitching together raw `blitz-host-*` crates.
 
 ---
 
-## 5. Required Integration Cleanup
+## 5. What This Pass Must Clarify in Code/Design
 
-You must reduce how much raw low-level `blitz-host-*` knowledge leaks into `oxidase-native-runner`.
+You must make the following explicit and truthful:
 
-The runner should still be the proof harness, but the integration should be cleaner.
+1. what remains inside `blitz-host`
+2. what moves to the `oxidase` integration surface
+3. how `#[oxidase::main]` would participate when the feature is enabled
+4. what still blocks true generic non-`oxidase` single-init integration
+5. why `dioxus-native-dom` should stay dependency-clean with respect to `blitz-host`
 
-That means introducing a **higher-level integration helper** at the `blitz-host` facade layer.
+If you can implement real code toward this direction in the current workspace, do so.
 
-This helper does not need to be perfect or universal yet, but it should absorb obvious boilerplate such as:
-
-1. starting the debug-control server
-2. holding the bridge/runtime state
-3. exposing a cleaner servicing API to the host
-
-### Explicit runner recovery requirement
-
-The worker previously got the proof by hardcoding too much low-level `blitz-host` plumbing directly into `oxidase-native-runner`.
-
-This cleanup pass must explicitly address that.
-
-At minimum, the refactor should aim to:
-
-1. stop making `oxidase-native-runner` directly orchestrate multiple low-level `blitz-host-*` crates in an ad-hoc way
-2. move that knowledge behind the new top-level `blitz-host` facade
-3. give the runner a much smaller integration surface
-
-### Preferred integration shape
-
-The preferred outcome is:
-
-> in debug-control mode, the runner can enable `blitz-host` through a single high-level facade-level init/integration entrypoint (or the smallest honest equivalent), rather than open-coding server startup, static state, document-handle plumbing, and low-level bridge servicing all over the runner.
-
-Do not fake “one line” if the runtime truth still requires two or three explicit touchpoints.
-
-But do actively try to compress the current ugly wiring into the smallest clean integration surface that is technically honest.
-
-### Important constraint
-
-Do not claim this means “all Dioxus apps automatically support blitz-host.”
-
-This is still an internal opt-in integration helper, not magic upstream runtime support.
-
-Be honest about that in code and documentation.
+If some parts are not yet implementable cleanly without broader changes, make the limits explicit rather than pretending they are done.
 
 ---
 
-## 6. CLI / Surface Direction
+## 6. Preferred Outcome
 
-The canonical user-facing CLI should belong to the top-level `blitz-host` surface, not feel like an accidental byproduct of `blitz-host-transport`.
+The preferred outcome of this pass is one of:
 
-Preserve the cleaned command direction that already emerged:
+### Best case
 
-1. `blitz-host inspect`
-2. `blitz-host click <NODE_ID>`
-3. per-subcommand `--help`
+You actually land the beginning of the real `oxidase`-side feature-gated integration surface.
 
-Do not re-expand the CLI surface unnecessarily in this pass.
+### Acceptable case
 
-This pass is about structural cleanup, not new command proliferation.
+You materially restructure the current code and docs so that:
 
----
+1. `blitz-host` is clearly the internal engine/tooling project
+2. `oxidase` is clearly the intended downstream ergonomic boundary
+3. the dependency model and feature model are explicit and honest
 
-## 7. What You Must Preserve
-
-Do not lose the currently proven vertical slice.
-
-After your refactor, these must still work:
-
-1. live runner attach
-2. inspect
-3. click
-4. settle
-5. changed-state proof
-
-If the cleanup makes the code prettier but breaks the proof, it is not acceptable.
+But do not claim actual `#[oxidase::main]` automatic feature-based injection is complete unless it truly is.
 
 ---
 
-## 8. Files / Areas to Reinspect
+## 7. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
-
-And then add the new facade crate:
-
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-macro/`
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/blitz/packages/dioxus-native-dom/`
 
 ---
 
-## 9. Validation You Must Run
+## 8. Validation You Must Run
 
-Run the smallest commands that prove the cleanup preserved reality.
+Run the smallest commands that honestly validate the work you actually land.
 
 At minimum:
 
-1. `cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture`
-2. any additional crate-level checks needed after adding the facade crate
-3. proof that `oxidase-native-runner --debug-control` still supports:
-   - inspect
-   - click
-   - settle
-   - changed-state re-inspection
+1. relevant `cargo check` / `cargo test` for `util/blitz-host`
+2. relevant `cargo check` / `cargo test` for `util/oxidase` if you touch it
+3. proof that the existing attach / inspect / click / settle flow still works if your changes affect the current working path
 
-Do not call this complete based only on compile success.
+Do not call this complete based only on design prose.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 10. `result.md` Requirement
+## 9. `result.md` Requirement
 
 Update:
 
@@ -254,26 +206,22 @@ Update:
 
 It must explicitly record:
 
-1. what facade crate was added
-2. what it re-exports
-3. where the canonical CLI surface now lives
-4. how runner integration became cleaner
-5. how much of the old hardcoded low-level runner wiring was removed or hidden behind the facade/integration helper
-6. what low-level internals still remain split
-7. what proof still passed after the cleanup
-8. what is still **not** solved (for example: universal upstream integration)
+1. whether any real `oxidase`-side integration code was added
+2. what the intended dependency line is (`oxidase` feature + Git/tag dependency)
+3. why `dioxus-native-dom` does or does not need to know about `blitz-host`
+4. what remains inside `blitz-host`
+5. what still remains unresolved
 
 ---
 
-## 11. Final Verdict Rule
+## 10. Final Verdict Rule
 
-You may report **Implemented and runtime-proven** only if:
+You may report **Implemented and directionally integrated** only if:
 
-1. the top-level `blitz-host` facade crate exists
-2. the CLI surface is routed through that facade cleanly enough
-3. runner integration is meaningfully cleaner than before, and the old ugly hardcoded low-level spike wiring in `oxidase-native-runner` is materially reduced or hidden behind facade-level init/helper code
-4. the previously proven act/settle proof still works after the refactor
-5. the result report stays honest about current limits
+1. the `blitz-host` / `oxidase` boundary is materially clearer than before
+2. the dependency story is made truthful
+3. `dioxus-native-dom` is kept free of direct `blitz-host` dependency
+4. the report clearly distinguishes current implementation from target architecture
 
 Otherwise report:
 
@@ -281,8 +229,6 @@ Otherwise report:
 or
 - **Blocked with evidence**
 
-The next step is not new capability for capability’s sake.
+The purpose of this pass is:
 
-It is:
-
-> turn the proven low-level spike into a cleaner and more usable internal product shape.
+> shift `blitz-host` from being a direct consumer burden toward becoming an optional `oxidase` ecosystem feature, while keeping `dioxus-native-dom` dependency-clean.

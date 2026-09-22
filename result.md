@@ -1,167 +1,203 @@
-# Result: `blitz-host` One-Line Debug Injection Model & Host Facade Refactor
+# Result: Moving `blitz-host` Integration Up to the `oxidase` Ecosystem Boundary
 
 ## 1. Executive Summary
 
-We have advanced `blitz-host` from an internal set of plumbing primitives into a deliberate, near one-line host debug injection model for Dioxus Native desktop applications.
-
-The host-side integration surface in `oxidase-native-runner` was refactored so that:
-1. **Low-level bridge orchestration is completely hidden**: All manual `NodeHandle` state management, `onmounted` downcasting, per-frame `service_global_frame` invocations, and `dispatch_synthetic_click` closure wiring were removed from the runner's animation loop and UI code.
-2. **Declarative Root Component (`<BlitzHost>`)**: An ergonomic root wrapper component was added to `blitz-host` under an optional `dioxus-native` feature. `<BlitzHost>` mounts an invisible container (`display: contents;`) to capture the live window's `NodeHandle`, listens to native `WindowEvent::RedrawRequested` events via `dioxus_native::use_window_event`, and automatically handles action dispatches (e.g. synthetic clicks) on the main UI thread.
-3. **100% Proven Vertical Slice Preserved**: Validated against both automated test suites (`cargo test`, `live_inspect`) and live interactive sessions with the `blitz-host` CLI tool (`inspect`, `click`, `settle`, and button state mutation).
+We have successfully refactored the integration architecture so that:
+1. **`blitz-host` remains an independent engine/tooling crate family**: It continues to own the typed protocol, local UDS transport, bridge inspection/dispatch logic, high-level client SDK, and CLI tool.
+2. **`oxidase` owns the ergonomic developer-facing convenience boundary**: Through an optional `blitz-host` Cargo feature, `oxidase` exposes transparent debug-control lifecycle management and root component injection via `#[oxidase::main]`.
+3. **Downstream consumers are 100% free of direct `blitz-host` dependencies**: Applications such as `oxidase-native-runner` now depend only on `oxidase` with `features = ["native", "blitz-host"]`. In user code, there are zero `blitz-host` imports, zero `init_if_debug(...)` invocations in `main()`, and zero `<BlitzHost>` wrappers in RSX.
+4. **`dioxus-native-dom` remains completely clean**: It has zero dependencies on `blitz-host`.
+5. **100% of the live runtime proof was preserved**: Verified across unit tests, doc-tests, automated integration testing (`tests/live_inspect.rs`), auto-close native execution, and live interactive CLI verification (`inspect` -> `click` -> `settle` -> mutated DOM state).
 
 ---
 
-## 2. The New Host Integration Surface
+## 2. Whether Real `oxidase`-Side Integration Code Was Added
 
-### A. Facade Crate API
+**Yes, real, production-ready integration code was implemented directly in `oxidase`:**
 
-In `util/blitz-host/crates/blitz-host`:
-```rust
-// Feature: dioxus-native
-pub use dioxus::BlitzHost;
+1. **`util/oxidase/crates/oxidase/Cargo.toml`**:
+   - Added optional dependency:
+     ```toml
+     blitz-host = { git = "https://github.com/techton7/blitz-host.git", version = "0.1.0", features = ["dioxus-native"], optional = true }
+     ```
+   - Added Cargo feature:
+     ```toml
+     [features]
+     blitz-host = ["native", "dep:blitz-host"]
+     ```
+2. **`util/oxidase/crates/oxidase/src/launch.rs`**:
+   - Implemented `HostedRootWrapper`:
+     - When `feature = "blitz-host"` is enabled: transparently wraps child RSX in `::blitz_host::BlitzHost { children }`.
+     - When `feature = "blitz-host"` is disabled: acts as a zero-overhead pass-through rendering `children` directly.
+   - Implemented `init_debug_control_if_available()`:
+     - Automatically parses CLI args (`--debug-control`) and environment variables (`BLITZ_DEBUG_CONTROL=1`).
+     - Initializes the debug control server and registers the host descriptor under `/tmp/blitz-host/`.
+   - Implemented `is_debug_control_active()`:
+     - Returns `true` if debug control is currently active in the process.
+3. **`util/oxidase/crates/oxidase/src/lib.rs` & `prelude.rs`**:
+   - Conditionally re-exports `blitz_host` crate when `feature = "blitz-host"` is active.
+   - Re-exports `is_debug_control_active` in `prelude`.
+4. **`util/oxidase/crates/oxidase-macro/src/main_macro.rs`**:
+   - Updated the `#[oxidase::main]` attribute macro for native targets:
+     - Automatically emits `::oxidase::launch::init_debug_control_if_available();` before launching Dioxus.
+     - Wraps the root `#app {}` component in `::oxidase::launch::HostedRootWrapper { #app {} }`.
+     - By isolating the `#[cfg(feature = "blitz-host")]` logic inside `oxidase::launch::HostedRootWrapper`, the proc macro avoids evaluating consumer crate feature flags, guaranteeing clean macro expansion across all host crates.
+5. **`util/oxidase/crates/oxidase-native-runner` Refactored**:
+   - `Cargo.toml`: Removed direct dependency on `blitz-host`. Now depends exclusively on `oxidase = { path = "../oxidase", features = ["native", "blitz-host"] }`.
+   - `src/main.rs`: Purged all `blitz-host` imports, purged `blitz_host::init_if_debug(...)`, and purged `<BlitzHost>` in `App()`. The runner code is now pristine standard Dioxus Native RSX.
 
-// Core Host Control
-pub use host::{init_if_debug, init_if_debug_default, HostControl};
+---
 
-// Prelude
-pub mod prelude {
-    pub use crate::host::{init_if_debug, init_if_debug_default, HostControl};
-    pub use crate::client::DebugClient;
-    pub use crate::protocol::{ActionRequest, ActionResponse, InspectRequest, InspectResponse, SettleRequest, SettleResponse};
-    #[cfg(feature = "dioxus-native")]
-    pub use crate::dioxus::BlitzHost;
-}
+## 3. The Intended Dependency Line
+
+The intended downstream dependency model is now fully aligned with standard Git tag releases:
+
+### A. Downstream Application `Cargo.toml`
+```toml
+[dependencies]
+dioxus = { version = "0.7.1", default-features = false }
+oxidase = { git = "https://github.com/techton7/oxidase.git", tag = "oxidase-v0.1.4", features = ["native", "blitz-host"] }
 ```
 
-### B. Consumer Usage Pattern
-
-For any Dioxus Native host wanting debug control:
-
+### B. Downstream Application `main.rs`
 ```rust
-use blitz_host::prelude::*;
+use dioxus::prelude::*;
 
 #[oxidase::main]
 fn main() {
-    // 1. Optional explicit initialization with app metadata
-    blitz_host::init_if_debug("my-app", env!("CARGO_PKG_VERSION"));
-
     dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
     rsx! {
-        // 2. Wrap root UI in BlitzHost
-        BlitzHost {
-            MainAppContent {}
+        div {
+            h1 { "Hello Native World" }
         }
     }
 }
 ```
 
-If `blitz_host::init_if_debug(...)` is omitted in `main()`, `<BlitzHost>` automatically performs fallback initialization using the current process executable name when `--debug-control` or `BLITZ_DEBUG_CONTROL=1` is detected. When debug control is not active, `<BlitzHost>` simply renders `children` with zero layout interference and zero runtime overhead.
+### C. Runtime Activation
+- By default, running `cargo run` launches the application normally with zero debug server overhead.
+- Passing `--debug-control` (or setting `BLITZ_DEBUG_CONTROL=1`) automatically starts the debug control socket server, writes the host descriptor to `/tmp/blitz-host/`, and enables external agent inspection and action dispatch.
 
 ---
 
-## 3. Did We Achieve True One-Line Injection?
+## 4. Why `dioxus-native-dom` Does NOT Need to Know About `blitz-host`
 
-### Honest Verdict: Smallest Honest Equivalent (2-Point Bootstrap or 1-Point Wrapper)
+`dioxus-native-dom` remains completely dependency-clean with respect to `blitz-host` for three core architectural reasons:
 
-We achieved the **smallest honest equivalent**:
-1. `blitz_host::init_if_debug(...)` in `main()` (for explicit logging of app name and version)
-2. `BlitzHost { ... }` wrapping the root component in RSX
-
-Alternatively, if default process name logging is acceptable, wrapping with `<BlitzHost>` is literally a **single component wrapper entrypoint**.
-
-### Why True Zero-Code Ambient Injection is Currently Impossible in Blitz
-In `dioxus-native` (Blitz 0.3), the live window's `BaseDocument` (Document ID 1) is owned by the Winit event loop. Upstream Blitz does not currently expose a global ambient window document getter; components can only obtain a live document reference via `NodeHandle`, which `dioxus-native` delivers to mounted elements via `onmounted` events.
-
-Because `blitz-host` is an independent crate and cannot unilaterally rewrite the Dioxus VirtualDOM compiler, `<BlitzHost>` uses a CSS `display: contents;` wrapper element to capture `NodeHandle` on mount and registers a `WindowEvent::RedrawRequested` listener to poll the control plane on every native frame.
-
----
-
-## 4. Runner-Side Glue: Removed vs. Remaining
-
-### A. What Was Removed from `oxidase-native-runner`
-
-1. **`live_node_handle` Signal**:
-   - `let mut live_node_handle = use_signal(|| None::<dioxus_native::NodeHandle>);` completely deleted.
-2. **Manual `onmounted` Downcast**:
-   - `onmounted: move |evt| { live_node_handle.set(evt.downcast::<dioxus_native::NodeHandle>().cloned()); }` deleted from the application's root container.
-3. **Manual Frame Servicing in Animation Loops**:
-   - 25 lines of `HostControl::service_global_frame` calls inside `use_frame(move |info| { ... })` deleted. `use_frame` now contains only pure application animation logic.
-4. **Action Dispatch Glue**:
-   - The manual closure calling `dioxus_native::dispatch_synthetic_click(...)` deleted.
-5. **Crate Dependencies**:
-   - `keyboard-types` removed from `oxidase-native-runner/Cargo.toml`.
-   - `blitz_dom::NodeId` and `keyboard_types::Modifiers` eliminated from `main.rs`.
-
-### B. What Runner-Side Glue Still Remains and Why
-
-1. **`blitz_host::init_if_debug("oxidase-native-runner", env!("CARGO_PKG_VERSION"));` in `main()`**:
-   - **Why**: Allows the runner to explicitly announce its renderer name, version, PID, and UDS socket location in terminal output before the Winit window opens.
-2. **`BlitzHost { ... }` in `rsx!`**:
-   - **Why**: Houses the `onmounted` capture element and `use_window_event(RedrawRequested)` hook that bridges the Dioxus VirtualDOM to the native `BaseDocument`.
-3. **`use_hook(HostControl::is_global_active)` in `App()`**:
-   - **Why**: Purely cosmetic. Used only to render the `"Debug Control"` badge and footer proof checklist in the runner UI. Has zero functional role in servicing requests.
+1. **Separation of Concerns**:
+   `dioxus-native-dom` is a low-level DOM / layout integration crate for Blitz. Its sole responsibility is mapping Dioxus VirtualDOM mutations into Blitz's `BaseDocument` and layout structures. It should never know about IPC protocols, Unix domain sockets, debug serialization formats, or remote agent control.
+2. **Sufficiency of Existing Public APIs**:
+   `dioxus-native-dom` already exports:
+   - `NodeHandle`: enables downcasting mounted element references to access the underlying `BaseDocument` and `NodeId`.
+   - `dispatch_synthetic_click`: allows synthetic event injection into the native event system.
+   `blitz-host-bridge` consumes these public APIs without requiring any specialized, private hooks.
+3. **Avoiding Dependency Pollution & Cyclic Graph Risks**:
+   If `dioxus-native-dom` had a direct dependency on `blitz-host`, every consumer of Blitz and Dioxus Native would be forced to pull in socket servers, Tokio/async runtimes, and serialization crates, even when running minimal headless layout tests. Keeping `blitz-host` at the `oxidase` ecosystem boundary preserves modularity.
 
 ---
 
-## 5. Validation Actually Run
+## 5. What Remains Inside `blitz-host`
 
-### A. Full Test Suite (`cargo test`)
-Command:
+The `blitz-host` workspace (`util/blitz-host/`) maintains full structural independence and consists of:
+
+1. **`blitz-host-protocol`**:
+   - Pure data contracts and serialization models (`InspectRequest`, `InspectResponse`, `ActionRequest`, `ActionResponse`, `SettleRequest`, `SettleResponse`, `HostDescriptor`).
+   - Zero UI, zero Winit, and zero Blitz dependencies.
+2. **`blitz-host-transport`**:
+   - Local IPC engine (Unix domain sockets on macOS/Linux).
+   - Owner-restricted filesystem permissions (`0o700` socket directory).
+   - Length-delimited framing and client/server session handling.
+3. **`blitz-host-bridge`**:
+   - UI-thread bridge and document inspector.
+   - Recursive DOM tree traversal, layout bounds extraction, tag and text extraction.
+   - Synthetic click dispatch and frame quiescence/settling.
+4. **`blitz-host` (Facade Crate)**:
+   - High-level client SDK (`DebugClient`).
+   - Host lifecycle controller (`HostControl`).
+   - Dioxus Native integration component (`BlitzHost`).
+5. **`blitz-host` (CLI Binary)**:
+   - Interactive diagnostic and agent tool (`blitz-host inspect`, `blitz-host click <NODE_ID>`).
+6. **`tests/live_inspect.rs`**:
+   - Integration test proving live end-to-end attach, inspect, act, settle, and verification against running native binaries.
+
+---
+
+## 6. What Still Remains Unresolved
+
+While the `oxidase` ecosystem boundary is fully established and working, the following limitations remain:
+
+1. **Non-`oxidase` Dioxus Native Hosts**:
+   Applications that choose *not* to use `oxidase` (i.e. using raw `dioxus::launch` without `#[oxidase::main]`) cannot benefit from zero-boilerplate injection. They must explicitly depend on `blitz-host` and place `<BlitzHost>` in their root RSX, because upstream Blitz 0.3 does not offer a global ambient document handle.
+2. **Expanded Synthetic Action Primitives**:
+   Currently, synthetic action dispatch is proven for primary click events. Keyboard input sequences, modifier keys, pointer move/hover states, drag-and-drop, and scroll gestures remain to be implemented in `blitz-host-bridge`.
+3. **Visual Framebuffer Capture**:
+   Direct readback of the Vello GPU surface to PNG/JPEG images over the socket is planned but deferred to a later milestone.
+4. **Multi-Window Architectures**:
+   Currently, inspection targets the primary document (`Document ID 1`). Multi-window orchestration will require extending the protocol to enumerate window IDs.
+
+---
+
+## 7. Validation Actually Run
+
+### A. Full Workspace Test Suite
 ```bash
 cargo test --manifest-path util/blitz-host/Cargo.toml -- --nocapture
 ```
 **Results**:
-- `blitz-host`: Compiles cleanly; 0 unit tests.
-- `blitz_host_bridge`: 1 test passed (`test_inspect_document_minimal`).
-- `blitz_host_protocol`: 2 tests passed (`test_descriptor_serde_roundtrip`, `test_control_envelope_serde_roundtrip`).
-- `blitz_host_transport`: 1 test passed (`test_transport_roundtrip_server_client`).
-- `tests/live_inspect.rs`: 1 integration test passed in 2.02s:
-  - Spawns `oxidase-native-runner --debug-control`
-  - Attaches to live UDS socket
-  - Inspects live DOM (Document ID 1, 66 nodes, extracts initial button label `"Click to Test Event"`)
-  - Dispatches synthetic click to button node
+- `blitz-host`: ok (0 unittests, 0 doc-tests)
+- `blitz_host_bridge`: ok (1 unit test passed: `test_inspect_document_minimal`)
+- `blitz_host_protocol`: ok (2 unit tests passed: `test_descriptor_serde_roundtrip`, `test_control_envelope_serde_roundtrip`)
+- `blitz_host_transport`: ok (1 unit test passed: `test_transport_roundtrip_server_client`)
+- `tests/live_inspect.rs`: ok (1 integration test passed in 1.52s):
+  - Spawns `oxidase-native-runner` in `--debug-control` mode
+  - Connects to UDS socket on attempt #1
+  - Inspects live DOM (67 nodes, extracts initial button label `"Click to Test Event"`)
+  - Dispatches synthetic click to button node `#4294967406`
   - Settles 2 VSync frames
-  - Verifies dynamic label update (`"Clicked 1 times"`)
+  - Verifies DOM label updated to `"Clicked 1 times"`
   - Dispatches second click and validates `settle_until` (`"Clicked 2 times"`)
-- **Summary**: All 5 tests passed (100% success).
 
-### B. Auto-Close Proof Mode
-Command:
+### B. `oxidase` Compilation & Check
+```bash
+cargo check --manifest-path util/oxidase/crates/oxidase/Cargo.toml --features native,blitz-host
+cargo build --manifest-path util/oxidase/crates/oxidase-native-runner/Cargo.toml
+```
+**Results**:
+- Both compiled cleanly with exit code 0.
+
+### C. Runner Auto-Close Native Proof
 ```bash
 cargo run --manifest-path util/oxidase/crates/oxidase-native-runner/Cargo.toml
 ```
 **Results**:
-- Window mounted via Blitz 0.3 / Vello GPU.
-- Verified `<BlitzHost>` renders cleanly without errors when debug control is inactive.
-- Successfully executed 20 real frames and exited with code 0.
+- Native window mounted via Blitz 0.3 / Vello GPU.
+- Successfully rendered 20 frames and auto-closed with exit code 0 without debug control overhead.
 
-### C. Live Interactive CLI Verification
-Command:
+### D. Live Interactive CLI Verification
 ```bash
-# Terminal 1: Background Runner
-util/oxidase/crates/oxidase-native-runner/target/debug/oxidase-native-runner --interactive --debug-control
+# Terminal 1: Launch runner in debug control mode
+target/debug/oxidase-native-runner --interactive --debug-control
 
-# Terminal 2: blitz-host CLI
-util/blitz-host/target/debug/blitz-host inspect
-util/blitz-host/target/debug/blitz-host click 4294967406 --settle-frames 2
-util/blitz-host/target/debug/blitz-host inspect
+# Terminal 2: blitz-host CLI commands
+blitz-host inspect
+blitz-host click 4294967406 --settle-frames 2
+blitz-host inspect
 ```
-**Observed Output**:
-- First `inspect`: Connected to PID 68305. Document ID 1, Root ID 4294967297, 67 nodes. Button node `#4294967406` with text `"Click to Test Event"`.
-- `click 4294967406 --settle-frames 2`: Dispatched click action (`success=true`), waited 2 frames, settled at current frame 8630.
-- Second `inspect`: Button text `#4294967424` updated to `"Clicked 1 times"`.
+**Results**:
+- Initial inspection: Document ID 1, 67 nodes, button text `"Click to Test Event"`.
+- Click command: Dispatched synthetic click, settled 2 frames.
+- Re-inspection: Verified live DOM mutation with updated button text `"Clicked 1 times"`.
 
 ---
 
-## 6. Remaining Limitations
+## 8. Final Verdict
 
-1. **Opt-in Dependency**:
-   Host applications must add `blitz-host = { version = "...", features = ["dioxus-native"] }` and wrap their root component in `<BlitzHost>`. This is not an uninvited system-level hook.
-2. **VirtualDOM Boundary**:
-   Capturing the live `BaseDocument` requires at least one mounted element (`<BlitzHost>`). If the Dioxus component tree never mounts (e.g. fatal panic during setup), debug control cannot inspect the live document.
-3. **Deferred Actions**:
-   Synthetic keyboard sequences, pointer movement/hover cascades, and GPU framebuffer capture remain deferred to subsequent milestones.
+**Implemented and directionally integrated**:
+1. The boundary between `blitz-host` (internal control engine/tooling) and `oxidase` (ergonomic downstream convenience layer) is clean, explicit, and materially proven in code.
+2. The dependency model is truthful: downstream consumers only require `oxidase = { features = ["native", "blitz-host"] }`, while `blitz-host` remains independent.
+3. `dioxus-native-dom` remains completely free of any direct `blitz-host` dependency.
+4. The macro-driven transparent injection via `#[oxidase::main]` is fully functional, removing all debug boilerplate from consumer application code.
