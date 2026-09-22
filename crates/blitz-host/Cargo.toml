@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "Canonical facade, CLI, and host control plane for live Blitz desktop applications"
 
 [dependencies]
-blitz-host-protocol = { version = "0.1.0", path = "../blitz-host-protocol" }
-blitz-host-transport = { version = "0.1.0", path = "../blitz-host-transport" }
-blitz-host-bridge = { version = "0.1.0", path = "../blitz-host-bridge" }
+blitz-host-protocol = { version = "0.1.1", path = "../blitz-host-protocol" }
+blitz-host-transport = { version = "0.1.1", path = "../blitz-host-transport" }
+blitz-host-bridge = { version = "0.1.1", path = "../blitz-host-bridge" }
 blitz-dom = { version = "0.3.0-beta.2", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
