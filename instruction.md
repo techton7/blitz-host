@@ -1,4 +1,4 @@
-# Worker Instruction: Finish the `oxidase` Boundary Move for `blitz-host` for Real
+# Worker Instruction: Add a Canonical Cross-Host `oxidase` Example and Keep the Native Proof Harness
 
 You are working in:
 
@@ -6,9 +6,11 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The previous pass moved in the right direction, but it stopped halfway and overclaimed the result.
+The `blitz-host` → `oxidase` boundary move is now established.
 
-This pass must finish the job honestly.
+The next architectural step is also fixed:
+
+> **`oxidase` should have a single canonical example that demonstrates the same app code path working on both Web and Native, while `oxidase-native-runner` remains as the native-specific proof harness.**
 
 Write all agent-facing reasoning in English.
 
@@ -25,161 +27,176 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-The intended architecture is now fixed:
+Deliver the correct split between:
 
-1. `blitz-host` remains a separate project/crate family
-2. `oxidase` is the ergonomic integration boundary
-3. `dioxus-native-dom` does **not** directly depend on `blitz-host`
-4. an `oxidase` consumer with the `blitz-host` feature should be able to use ordinary:
+1. **canonical cross-host consumer proof**
+2. **native-specific proof harness**
 
-```rust
-#[oxidase::main]
-fn main() {
-    dioxus::launch(App);
-}
-```
+Specifically:
 
-without directly importing `blitz_host`, calling `blitz_host::init_if_debug(...)`, or wrapping RSX in `<BlitzHost>`.
+### A. Add or promote one `oxidase` example
 
-That is the actual target.
+There should be a single canonical `oxidase` example that represents the actual product value proposition:
 
----
+> the same app code path works on both Web and Native through `oxidase`
 
-## 2. What Was Wrong With the Previous Pass
+### B. Keep `oxidase-native-runner`
 
-The previous pass was not sufficient because:
+Do **not** remove `oxidase-native-runner` in this pass.
 
-1. `oxidase-native-runner` still directly imported `blitz_host`
-2. it still directly called `blitz_host::init_if_debug(...)`
-3. it still directly wrapped the app UI in `<BlitzHost>`
-4. the result text claimed downstream consumers were free of direct `blitz-host` usage, which was false
-5. the result text also implied `oxidase-v0.1.4` already represented this state, which was false because `util/oxidase` was ahead of the `oxidase-v0.1.4` tag
+It should remain the place for:
 
-This pass must correct the code **and** the truthfulness.
+1. auto-close proof mode
+2. native-specific debug-control proof
+3. deterministic attach / inspect / click / settle verification
+4. proof-oriented logging and harness behavior
 
----
+The example and the runner serve different roles and should be treated that way.
 
-## 3. Required Outcome
+### C. Make the runner reproducible, not path-fragile
 
-### A. Real ergonomic boundary
+If `oxidase-native-runner` is going to remain a durable proof harness, its canonical dependency story should prefer fixed refs:
 
-Make the ergonomic boundary real, not aspirational.
+1. GitHub repository dependencies pinned by tag
+2. published versions where appropriate
 
-That means:
-
-1. a host/runnner using `oxidase` with `features = ["native", "blitz-host"]`
-2. and using ordinary `#[oxidase::main]`
-
-should not need any explicit `blitz_host::*` calls in application code.
-
-### B. Remove direct `blitz-host` consumer burden from the runner
-
-In `oxidase-native-runner`, remove direct app-level usage of:
-
-1. `use blitz_host::...`
-2. `blitz_host::init_if_debug(...)`
-3. `<BlitzHost> ... </BlitzHost>`
-
-If the current `oxidase` integration is not yet sufficient to replace those, then it is not done.
-
-### C. Keep `dioxus-native-dom` dependency-clean
-
-Do not add a direct dependency from `dioxus-native-dom` to `blitz-host`.
-
-If additional support is needed, prefer:
-
-1. narrowly-scoped API hooks
-2. `oxidase`-side integration
-3. separate glue owned above the DOM crate
-
-But do not make `dioxus-native-dom` a `blitz-host` consumer.
+Local path overrides may still exist for active monorepo development convenience, but they must not be the only truth for the long-lived harness story if a more reproducible tagged path is intended.
 
 ---
 
-## 4. The Tag / Dependency Story Must Be Honest
+## 2. The Intended Split
 
-You must not claim a Git/tag dependency line that is not real.
+### Canonical `oxidase` example
 
-That means:
+This should prove the public cross-host story:
 
-### If you keep saying downstream users can depend on:
+1. same UI code
+2. Web support
+3. Native support
+4. `oxidase` ergonomics
+5. when relevant, `blitz-host`/`--debug-control` attach path on Native
 
-```toml
-oxidase = { git = "https://github.com/techton7/oxidase.git", tag = "oxidase-vX.Y.Z", features = ["blitz-host"] }
-```
+### `oxidase-native-runner`
 
-then you must ensure the referenced tag actually contains the integration.
+This should remain the internal harness for native-specific proof:
 
-### Concretely
+1. proof mode
+2. auto-close mode
+3. attach/click/settle assertions
+4. native host/runtime-specific validation
 
-If `oxidase-v0.1.4` does **not** contain the finished integration, then:
-
-1. do **not** keep pointing to `oxidase-v0.1.4` as if it does
-2. either:
-   - publish the next honest tag (for example `oxidase-v0.1.5` / `oxidase-macro-v0.1.5`) after validation
-   - or explicitly state that the dependency line is not yet remotely consumable
-
-Pick one and be truthful.
-
-Do not leave the result in a half-published, half-local fantasy state.
+Do not confuse the two.
 
 ---
 
-## 5. Required Direction in Code
+## 3. Current Facts You Should Start From
 
-You must move the actual integration far enough into `oxidase` that the runner becomes a true consumer of that ergonomic boundary.
+Unless reinspection disproves them:
 
-That may require:
+1. the `blitz-host` feature integration now lives at the `oxidase` boundary
+2. `oxidase-native-runner` no longer directly imports `blitz_host` in app code
+3. the native proof harness still exists and still matters
+4. what is missing now is the **canonical single example** that demonstrates the actual cross-host consumer story
 
-1. `oxidase` optional dependency and feature wiring
-2. `oxidase::launch` / `#[oxidase::main]` native bootstrap changes
-3. a feature-gated wrapper/init mechanism inside `oxidase`
-4. cleanup of runner dependencies and app code
-
-But the final externally visible truth must be:
-
-> the runner uses `oxidase` and the `blitz-host` feature, not raw `blitz_host` calls in app code.
+That is the problem this pass should solve.
 
 ---
 
-## 6. Files / Areas to Reinspect
+## 4. Required Example Direction
+
+Create or promote one `oxidase` example under the `oxidase` crate that is the canonical cross-host sample.
+
+It should be designed so that:
+
+1. the same app/component code is meaningful on Web
+2. the same app/component code is meaningful on Native
+3. the example demonstrates the core `oxidase` value, not random unrelated UI
+
+### Preferred example characteristics
+
+The example should ideally show:
+
+1. `#[oxidase::main]`
+2. `use_frame`
+3. `next_frame`
+4. a small interactive state mutation that is visible in both Web and Native
+5. if native debug-control proof is exercised against it, a stable inspect/click target
+
+It does not need to become a huge showcase.
+
+Keep it small and representative.
+
+---
+
+## 5. Relationship Between Example and Runner
+
+The example and the runner should not drift into unrelated apps if avoidable.
+
+If helpful, extract shared app/UI logic so that:
+
+1. the example is the canonical consumer story
+2. the runner reuses the same or very similar UI for proof-harness purposes
+
+This is preferred if it keeps maintenance low and avoids divergence.
+
+But do not force a bad abstraction if it becomes messy.
+
+The key requirement is conceptual alignment:
+
+> the runner should prove the same consumer story the example represents, while still adding native-specific proof machinery.
+
+---
+
+## 6. What Not to Do
+
+1. do not delete `oxidase-native-runner`
+2. do not let the runner remain the *only* place the cross-host value is shown
+3. do not add multiple competing examples if one canonical example is enough
+4. do not turn this into a large demo gallery
+
+This pass is about clarifying the architecture, not multiplying surfaces.
+
+---
+
+## 7. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/Cargo.toml`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/Cargo.toml`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/launch.rs`
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/lib.rs`
-8. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/prelude.rs`
-9. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-macro/src/main_macro.rs`
-10. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/Cargo.toml`
-11. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/src/main.rs`
-12. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/blitz/packages/dioxus-native-dom/`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
+6. the runner/example dependency wiring (`Cargo.toml`, feature flags, git tag pins, patch overrides)
+
+Reinspect enough surrounding code before deciding whether to add a new example or refactor an existing one into the canonical example.
 
 ---
 
-## 7. Validation You Must Run
+## 8. Validation You Must Run
 
-Run the smallest commands that prove the boundary is real.
+Run the smallest commands that prove the example/runner split is real.
 
 At minimum:
 
-1. `cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture`
-2. `cargo check --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/Cargo.toml -p oxidase --features native,blitz-host`
-3. `cargo build --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/Cargo.toml`
-4. proof that the runner still supports attach / inspect / click / settle / changed-state verification
-5. if you publish a new `oxidase` tag, verify the remote tags afterward
+1. relevant `cargo check` / `cargo test` for `util/blitz-host`
+2. compile validation for the chosen `oxidase` example
+3. native validation for the example if you wire it that far
+4. continued proof that `oxidase-native-runner` still works as the native-specific harness
+5. evidence that the runner’s intended long-lived proof path is pinned to stable refs/tags rather than being silently dependent on local path state, if you change that wiring in this pass
 
-Do not call this complete based only on local compile or on stale previously-built binaries.
+If the example is intended to be the actual cross-host canonical sample, validate both:
+
+1. Web compilation/path
+2. Native compilation/path
+
+Do not call this complete if only one host path works.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 8. `result.md` Requirement
+## 9. `result.md` Requirement
 
 Update:
 
@@ -187,23 +204,24 @@ Update:
 
 It must explicitly record:
 
-1. whether the runner still directly imports or calls `blitz_host`
-2. whether ordinary `#[oxidase::main]` is now sufficient in the runner
-3. whether the Git/tag dependency story is now actually true remotely
-4. whether a new `oxidase` tag was required and, if so, what it is
-5. what remains unresolved
+1. what canonical `oxidase` example now represents the cross-host story
+2. whether shared example/runner app logic was extracted
+3. what role remains for `oxidase-native-runner`
+4. whether the runner dependency story was moved to stable GitHub tags / versions or remains path-bound, and why
+5. how Web and Native were each validated
+6. what still remains unresolved
 
 ---
 
-## 9. Final Verdict Rule
+## 10. Final Verdict Rule
 
-You may report **Implemented and directionally integrated** only if:
+You may report **Implemented and directionally clarified** only if:
 
-1. the runner no longer directly imports or calls `blitz_host` in app code
-2. the `oxidase` boundary is materially real rather than aspirational
-3. the dependency/tag story is honest
-4. `dioxus-native-dom` remains free of direct `blitz-host` dependency
-5. the proven attach / inspect / click / settle flow still works
+1. `oxidase` now has one canonical cross-host example (or an existing one is clearly promoted/refactored into that role)
+2. `oxidase-native-runner` is still present as the native-specific proof harness
+3. the difference between example and runner is explicit and justified
+4. the runner’s durable proof path is either made more reproducible or any remaining path-bound state is explicitly justified
+5. the example’s Web and Native paths are both validated honestly
 
 Otherwise report:
 
@@ -213,4 +231,4 @@ or
 
 The purpose of this pass is:
 
-> finish the actual move to the `oxidase` ecosystem boundary instead of merely saying it happened.
+> make the cross-host consumer story visible in an `oxidase` example, while keeping the native-specific proof burden in the runner.
