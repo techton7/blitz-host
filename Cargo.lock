@@ -80,6 +80,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "blitz-host"
+version = "0.1.0"
+dependencies = [
+ "blitz-dom",
+ "blitz-host-bridge",
+ "blitz-host-protocol",
+ "blitz-host-transport",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "blitz-host-bridge"
 version = "0.1.0"
 dependencies = [

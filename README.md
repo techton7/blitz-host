@@ -15,7 +15,7 @@
 - **UI-Thread Safe DOM Inspection**: Safely traverses `blitz_dom::BaseDocument` on the main UI thread, extracting semantic tags, DOM IDs, WAI-ARIA roles, text nodes, and exact computed Stylo layout bounds (`[x, y, width, height]`).
 - **Native Event Action Dispatching**: Executes typed synthetic actions (`Click { node_id }`) through `dioxus-native-dom`'s own event pipeline (`synthetic_click_event`) instead of synthetic coordinate hacks.
 - **Deterministic VSync Frame Settling**: Provides `settle(frames)` and `settle_until(timeout, predicate)` to eliminate flaky timers and guarantee that layout passes and reactive state updates have fully settled.
-- **Zero-Overhead Decoupling**: 3-crate split ensures protocol consumers (clients/runners) never need to compile Blitz, Winit, or GPU renderers.
+- **Unified Facade & Decoupled Core**: `blitz-host` provides a clean top-level facade and CLI, while keeping protocol, transport, and bridge decoupled internally.
 
 ---
 
@@ -23,94 +23,120 @@
 
 | Crate | Purpose | Dependencies |
 |---|---|---|
+| [`blitz-host`](crates/blitz-host) | **Canonical top-level facade, CLI binary (`blitz-host`), and host lifecycle coordinator** | `protocol`, `transport`, `bridge`, `blitz-dom` |
 | [`blitz-host-protocol`](crates/blitz-host-protocol) | Pure typed request/response schema (`Inspect`, `Act`, `Settle`, `SemanticNode`) | `serde`, `serde_json` only |
-| [`blitz-host-transport`](crates/blitz-host-transport) | Local UDS server, client, discovery, and canonical CLI control tool (`blitz-host`) | `blitz-host-protocol`, `serde`, `libc` |
+| [`blitz-host-transport`](crates/blitz-host-transport) | Local UDS server, client, and discovery library | `blitz-host-protocol`, `serde`, `libc` |
 | [`blitz-host-bridge`](crates/blitz-host-bridge) | UI-thread adapter bridging `blitz_dom::BaseDocument` and frame-settle queues | `blitz-host-protocol`, `blitz-host-transport`, `blitz-dom` |
 
 ---
 
-## Quick Start
+## Canonical CLI Control Tool: `blitz-host`
 
-### 1. Attaching and Inspecting a Running Host
+Install or run the CLI directly from the `blitz-host` package:
 
-```rust
-use blitz_host_transport::DebugClient;
-use blitz_host_protocol::InspectRequest;
+```bash
+# Install globally
+cargo install blitz-host
 
-// Discover and attach to the most recent running Blitz host
-let mut client = DebugClient::connect_discovered(None)?;
-
-// Inspect live semantic tree
-let snapshot = client.inspect(InspectRequest::default())?;
-println!("Document ID: {}, Total Nodes: {}", snapshot.document_id, snapshot.node_count);
-
-for node in &snapshot.nodes {
-    if let Some(bounds) = node.bounds {
-        println!("Node #{} <{}> rect: {:?}", node.id, node.tag, bounds);
-    }
-}
+# Or run from workspace
+cargo run -p blitz-host --bin blitz-host -- [SUBCOMMAND]
 ```
 
-### 2. Dispatching Actions and Deterministic Frame Settling
+### 1. View Usage & Subcommands
+```bash
+blitz-host --help
+```
+
+### 2. Inspect Live Window
+```bash
+# Formatted human-readable DOM tree with layout bounds
+blitz-host inspect
+
+# Machine-readable JSON output for jq or AI agents
+blitz-host inspect --json
+
+# Subcommand-specific help
+blitz-host inspect --help
+```
+
+### 3. Click Elements with Auto-Settle
+```bash
+# Dispatches native synthetic click and auto-settles 2 VSync frames
+blitz-host click 4294967402
+
+# Subcommand-specific help
+blitz-host click --help
+```
+
+---
+
+## Rust Client API (`DebugClient`)
 
 ```rust
+use blitz_host::prelude::*;
 use std::time::Duration;
 
-// Find target button node
+// 1. Discover and connect to active Blitz desktop window
+let mut client = DebugClient::connect_discovered(None)?;
+
+// 2. Inspect live semantic DOM tree
+let snapshot = client.inspect(InspectRequest::default())?;
 let button = snapshot.nodes.iter().find(|n| n.tag == "button").unwrap();
 
-// Send typed click action through native event plumbing
+// 3. Dispatch click and auto-settle frames
 client.click(button.id)?;
-
-// Synchronize: wait for 2 VSync frames to allow state & DOM mutation
 client.settle(2)?;
 
-// Definitive proof: wait until the label reflects the updated state
-let updated_snapshot = client.settle_until(Duration::from_secs(3), |snap| {
+// 4. Verify resulting UI state change deterministically
+client.settle_until(Duration::from_secs(3), |snap| {
     snap.nodes.iter().any(|n| n.text.as_deref() == Some("Clicked 1 times"))
 })?;
 ```
 
 ---
 
-## Canonical CLI Control Tool: `blitz-host`
+## Host-Side Integration (`HostControl`)
 
-`blitz-host-transport` provides the standalone `blitz-host` binary:
+Host applications can enable `blitz-host` debug control via the `HostControl` facade helper without manual socket or mutex boilerplate:
 
-```bash
-# 1. Inspect live Blitz window (default)
-cargo run -p blitz-host-transport --bin blitz-host
+```rust
+use blitz_host::HostControl;
 
-# 2. Output live DOM hierarchy as JSON
-cargo run -p blitz-host-transport --bin blitz-host -- --json
+fn main() {
+    // 1. Starts UDS debug server if --debug-control or BLITZ_DEBUG_CONTROL=1 is set
+    HostControl::init_global_if_requested("my-app", env!("CARGO_PKG_VERSION"));
 
-# 3. Dispatch click action to a specific node on the live window
-cargo run -p blitz-host-transport --bin blitz-host -- click 4294967402
+    dioxus::launch(App);
+}
 
-# 4. View help
-cargo run -p blitz-host-transport --bin blitz-host -- --help
-```
+#[component]
+fn App() -> Element {
+    let mut live_handle = use_signal(|| None::<dioxus_native::NodeHandle>);
 
-Output:
-```text
-=================================================================
-[blitz-host] Blitz Host Live Inspector & Controller
-=================================================================
-Connected to host:
-  • Renderer        : oxidase-native-runner v0.1.0
-  • PID             : 9544
-  • Socket Path     : /tmp/blitz-host/9544-1789997960602929000.sock
------------------------------------------------------------------
-Received typed InspectResponse:
-  • Document ID: 1
-  • Root ID    : 4294967297
-  • Node Count : 66
------------------------------------------------------------------
-Hierarchy:
-#4294967297 <#document>
-  #4294967298 <html> rect(0.0, 0.0, 800.0, 600.0)
-    #4294967300 <body> rect(8.0, 8.0, 784.0, 584.0)
-      #4294967402 <button> id="test-interaction-button" rect(493.0, 0.0, 125.0, 27.0)
+    use_frame(move |info| {
+        // 2. Service control requests on the UI thread holding the document
+        if let Some(handle) = live_handle() {
+            HostControl::service_global_frame(&handle.doc(), info.frame_count, |req, doc| {
+                HostControl::handle_action_click(req, doc, |d, nid| {
+                    dioxus_native::dispatch_synthetic_click(
+                        d,
+                        blitz_dom::NodeId::from_u64(nid),
+                        keyboard_types::Modifiers::empty(),
+                    )
+                })
+            });
+        }
+    });
+
+    rsx! {
+        div {
+            onmounted: move |evt| {
+                live_handle.set(evt.downcast::<dioxus_native::NodeHandle>().cloned());
+            },
+            ...
+        }
+    }
+}
 ```
 
 ---

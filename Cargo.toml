@@ -4,6 +4,7 @@ members = [
     "crates/blitz-host-protocol",
     "crates/blitz-host-transport",
     "crates/blitz-host-bridge",
+    "crates/blitz-host",
 ]
 
 [workspace.package]

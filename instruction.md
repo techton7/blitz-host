@@ -1,4 +1,4 @@
-# Worker Instruction: Build the `blitz-host` `act + settle` Vertical Slice
+# Worker Instruction: Turn the Proven `blitz-host` Spike into a Usable Facade
 
 You are working in:
 
@@ -6,13 +6,19 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The inspect-only vertical slice is already implemented and runtime-proven.
+The current `blitz-host` spike has already proven the hard technical core:
 
-The next slice is now:
+1. attach to a live Blitz window
+2. inspect semantic state
+3. dispatch click
+4. settle
+5. re-inspect changed state
 
-> **send a real action into a live running Blitz window, wait for the UI to settle, and prove the changed state through a follow-up inspect**
+So the next task is **not** “add another low-level trick.”
 
-This is the entire goal of this pass.
+The next task is:
+
+> **make `blitz-host` structurally usable instead of leaving the current proof scattered across low-level crates and manual runner wiring**
 
 Write all agent-facing reasoning in English.
 
@@ -29,45 +35,46 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Extend the existing `blitz-host` inspect stack so that it can:
+Take the current working spike and refactor it into a cleaner, more usable shape centered on a **single top-level `blitz-host` facade crate**.
 
-1. send at least one real action to the running host
-2. execute that action on the correct UI thread
-3. wait until synchronous/reactive work has settled enough to read stable state
-4. re-inspect and prove the state change
+The main outcomes should be:
 
-The milestone question is:
+1. a top-level `blitz-host` crate exists
+2. it presents the usable external surface
+3. the CLI binary belongs to that surface
+4. `oxidase-native-runner` no longer needs to wire the low-level `protocol / transport / bridge` crates directly in an ugly ad-hoc way
+5. the current proven behavior still works after the cleanup
 
-> can an agent click a real live UI element in the running Blitz host and then observe the resulting state change through inspect?
-
-That is the next proof target.
+This is a structural cleanup and packaging pass built on top of the already-proven core.
 
 ---
 
-## 2. Scope Boundary
+## 2. The Problem You Are Solving
 
-This pass is **not** a full action platform.
+The current spike works, but it has two real structural problems:
 
-### Required in this slice
+### Problem A — the usable surface is fragmented
 
-1. a minimal typed action request surface
-2. UI-thread-safe action dispatch
-3. a concrete settle strategy after mutation
-4. runner-side observable state change target
-5. end-to-end proof: inspect → act → settle → inspect
+Right now the implementation is spread across:
 
-### Explicitly defer for later
+1. `blitz-host-protocol`
+2. `blitz-host-transport`
+3. `blitz-host-bridge`
 
-Do **not** turn this into a broad action suite unless it is almost free:
+That is a good internal split, but it is not a good top-level user-facing shape by itself.
 
-1. full keyboard/input matrix
-2. hover/pointer drag
-3. scroll control
-4. capture/image proof
-5. lifecycle commands
-6. multi-client behavior
+### Problem B — the runner integration is too low-level
 
-Keep the slice narrow and finish the real proof.
+Right now `oxidase-native-runner` knows too much about:
+
+1. low-level bridge types
+2. transport startup
+3. static storage / plumbing
+4. manual per-frame servicing details
+
+The proof is valid, but the integration shape is too exposed and too messy.
+
+The job now is to clean that up **without pretending the world is magically zero-wiring for every app**.
 
 ---
 
@@ -75,164 +82,171 @@ Keep the slice narrow and finish the real proof.
 
 Unless reinspection disproves them:
 
-1. `blitz-host` already has:
+1. `blitz-host` already works technically for:
+   - inspect
+   - click
+   - settle
+   - changed-state verification
+2. the current proof is real and must be preserved
+3. the internal 3-way split is still valuable:
    - `blitz-host-protocol`
    - `blitz-host-transport`
    - `blitz-host-bridge`
-   - `oxidase-native-runner --debug-control` integration
-2. inspect is already runtime-proven against a real running native Blitz window
-3. the runner UI already contains:
-   - a real button with `id="test-interaction-button"`
-4. the best next proof is to make that button trigger an inspect-visible state change
-
-This pass should build directly on the working inspect path, not redesign it.
+4. what is missing is a **clean facade and cleaner host-side integration**
+5. you must not turn this into fiction about official upstream Dioxus or universal automatic injection
 
 ---
 
-## 4. Required Action Surface
+## 4. Required Structural Direction
 
-Add the **smallest useful typed action surface**.
+### A. Create a top-level facade crate
 
-Recommended minimum:
+Add a top-level crate:
 
-1. `Click { node_id: u64 }`
+```text
+util/blitz-host/crates/blitz-host
+```
 
-If a second action is nearly free, acceptable next candidate:
+Its job is to provide the main usable surface.
 
-2. `Focus { node_id: u64 }`
+At minimum it should:
 
-But the pass can be considered successful with **click only**, if the proof is solid.
+1. re-export the public parts of:
+   - protocol
+   - transport/client
+   - bridge
+2. own the canonical CLI binary surface
+3. provide a higher-level integration surface for internal hosts/runners
 
-Do not expand beyond that unless it is low-cost and does not risk the schedule.
+### B. Keep the internal split
 
----
+Do **not** collapse everything into one file or destroy the internal architecture.
 
-## 5. Required Settle Behavior
+The correct model is:
 
-This is the most important part of the slice.
+1. internal implementation remains split
+2. external usability is unified behind `blitz-host`
 
-After a mutation-producing action, the system must not immediately pretend the UI is stable.
-
-You must add a concrete settle strategy sufficient for this pass.
-
-That can be some combination of:
-
-1. draining queued bridge work
-2. waiting for one or more frame turns
-3. polling until an expected inspect-visible condition stabilizes
-4. a bounded settle loop with explicit failure if stability is not reached
-
-### Important rule
-
-The proof must demonstrate that the post-action inspect is reading **changed settled state**, not just racing the mutation.
-
-Do not solve this with a vague sleep-only hack if a more host-aware bounded strategy is available.
+That is the distinction you are trying to achieve.
 
 ---
 
-## 6. Runner Proof Target
+## 5. Required Integration Cleanup
 
-Use the existing runner UI as the proof harness.
+You must reduce how much raw low-level `blitz-host-*` knowledge leaks into `oxidase-native-runner`.
 
-Required change:
+The runner should still be the proof harness, but the integration should be cleaner.
 
-1. make the button with `id="test-interaction-button"` produce an inspect-visible state change
+That means introducing a **higher-level integration helper** at the `blitz-host` facade layer.
 
-Examples of acceptable proof targets:
+This helper does not need to be perfect or universal yet, but it should absorb obvious boilerplate such as:
 
-1. increment a visible counter
-2. toggle a visible status text
-3. change an element label or badge
+1. starting the debug-control server
+2. holding the bridge/runtime state
+3. exposing a cleaner servicing API to the host
 
-The resulting state change must be something the inspect API can actually observe in the semantic tree.
+### Explicit runner recovery requirement
 
-### Preferred proof shape
+The worker previously got the proof by hardcoding too much low-level `blitz-host` plumbing directly into `oxidase-native-runner`.
 
-1. inspect tree
-2. locate button node by `dom_id`
-3. send `Click`
-4. wait for settle
-5. inspect again
-6. assert the visible state changed as expected
+This cleanup pass must explicitly address that.
 
----
+At minimum, the refactor should aim to:
 
-## 7. Protocol / Bridge / Runner Work Required
+1. stop making `oxidase-native-runner` directly orchestrate multiple low-level `blitz-host-*` crates in an ad-hoc way
+2. move that knowledge behind the new top-level `blitz-host` facade
+3. give the runner a much smaller integration surface
 
-### `blitz-host-protocol`
+### Preferred integration shape
 
-Extend the protocol with the smallest action vocabulary needed for this slice.
+The preferred outcome is:
 
-### `blitz-host-transport`
+> in debug-control mode, the runner can enable `blitz-host` through a single high-level facade-level init/integration entrypoint (or the smallest honest equivalent), rather than open-coding server startup, static state, document-handle plumbing, and low-level bridge servicing all over the runner.
 
-Extend the client/server path so action requests can be sent and acknowledged.
+Do not fake “one line” if the runtime truth still requires two or three explicit touchpoints.
 
-### `blitz-host-bridge`
+But do actively try to compress the current ugly wiring into the smallest clean integration surface that is technically honest.
 
-Implement action dispatch on the UI thread.
+### Important constraint
 
-This must target the real live document/window, not a synthetic mock.
+Do not claim this means “all Dioxus apps automatically support blitz-host.”
 
-### `oxidase-native-runner`
+This is still an internal opt-in integration helper, not magic upstream runtime support.
 
-Add the inspect-visible proof state change and ensure the debug-control lane can service action requests safely while the runner is live.
+Be honest about that in code and documentation.
 
 ---
 
-## 8. Critical Design Constraints
+## 6. CLI / Surface Direction
 
-### Must do
+The canonical user-facing CLI should belong to the top-level `blitz-host` surface, not feel like an accidental byproduct of `blitz-host-transport`.
 
-1. preserve the already-working inspect path
-2. keep action execution on the correct UI thread
-3. produce a real inspect-visible state change
-4. prove post-action settled inspection
-5. keep the scope small
+Preserve the cleaned command direction that already emerged:
 
-### Must not do
+1. `blitz-host inspect`
+2. `blitz-host click <NODE_ID>`
+3. per-subcommand `--help`
 
-1. do not redesign the whole protocol for future actions
-2. do not expand into capture/lifecycle unless almost free
-3. do not claim settle correctness without a real proof
-4. do not replace a real end-to-end proof with mock-only tests
+Do not re-expand the CLI surface unnecessarily in this pass.
+
+This pass is about structural cleanup, not new command proliferation.
 
 ---
 
-## 9. Files to Reinspect
+## 7. What You Must Preserve
+
+Do not lose the currently proven vertical slice.
+
+After your refactor, these must still work:
+
+1. live runner attach
+2. inspect
+3. click
+4. settle
+5. changed-state proof
+
+If the cleanup makes the code prettier but breaks the proof, it is not acceptable.
+
+---
+
+## 8. Files / Areas to Reinspect
 
 At minimum:
 
-1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/src/lib.rs`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/src/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/src/main.rs`
-7. current live proof harness/tests for inspect
+1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
+
+And then add the new facade crate:
+
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
 
 ---
 
-## 10. Validation You Must Run
+## 9. Validation You Must Run
 
-Run the smallest commands that prove this slice honestly.
+Run the smallest commands that prove the cleanup preserved reality.
 
 At minimum:
 
 1. `cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture`
-2. whatever targeted runner command is needed for live proof against `--debug-control`
-3. actual end-to-end proof of:
+2. any additional crate-level checks needed after adding the facade crate
+3. proof that `oxidase-native-runner --debug-control` still supports:
    - inspect
    - click
    - settle
-   - re-inspect with changed state
+   - changed-state re-inspection
 
-Do not call this complete based only on static compilation or unit tests.
+Do not call this complete based only on compile success.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 11. `result.md` Requirement
+## 10. `result.md` Requirement
 
 Update:
 
@@ -240,23 +254,26 @@ Update:
 
 It must explicitly record:
 
-1. what action vocabulary was added
-2. how action dispatch works on the UI thread
-3. what settle strategy was chosen
-4. what runner state change was used as the proof target
-5. the exact end-to-end proof observed
-6. what remains deferred to later slices
+1. what facade crate was added
+2. what it re-exports
+3. where the canonical CLI surface now lives
+4. how runner integration became cleaner
+5. how much of the old hardcoded low-level runner wiring was removed or hidden behind the facade/integration helper
+6. what low-level internals still remain split
+7. what proof still passed after the cleanup
+8. what is still **not** solved (for example: universal upstream integration)
 
 ---
 
-## 12. Final Verdict Rule
+## 11. Final Verdict Rule
 
 You may report **Implemented and runtime-proven** only if:
 
-1. a real action request can be sent to the live runner
-2. the runner executes it on the correct UI thread
-3. the system waits for settled state well enough to make the proof trustworthy
-4. a follow-up inspect confirms the expected changed state
+1. the top-level `blitz-host` facade crate exists
+2. the CLI surface is routed through that facade cleanly enough
+3. runner integration is meaningfully cleaner than before, and the old ugly hardcoded low-level spike wiring in `oxidase-native-runner` is materially reduced or hidden behind facade-level init/helper code
+4. the previously proven act/settle proof still works after the refactor
+5. the result report stays honest about current limits
 
 Otherwise report:
 
@@ -264,6 +281,8 @@ Otherwise report:
 or
 - **Blocked with evidence**
 
-The outcome of this task is:
+The next step is not new capability for capability’s sake.
 
-> a real `inspect → click → settle → inspect changed state` proof on the live internal Blitz runner.
+It is:
+
+> turn the proven low-level spike into a cleaner and more usable internal product shape.

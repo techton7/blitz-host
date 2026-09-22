@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use blitz_host_protocol::InspectRequest;
-use blitz_host_transport::DebugClient;
+use blitz_host::client::DebugClient;
+use blitz_host::protocol::InspectRequest;
 
 fn print_main_help() {
     println!(
