@@ -24,7 +24,7 @@
 | Crate | Purpose | Dependencies |
 |---|---|---|
 | [`blitz-host-protocol`](crates/blitz-host-protocol) | Pure typed request/response schema (`Inspect`, `Act`, `Settle`, `SemanticNode`) | `serde`, `serde_json` only |
-| [`blitz-host-transport`](crates/blitz-host-transport) | Local UDS server, client, discovery, and diagnostic CLI tool (`blitz-inspect`) | `blitz-host-protocol`, `serde`, `libc` |
+| [`blitz-host-transport`](crates/blitz-host-transport) | Local UDS server, client, discovery, and canonical CLI control tool (`blitz-host`) | `blitz-host-protocol`, `serde`, `libc` |
 | [`blitz-host-bridge`](crates/blitz-host-bridge) | UI-thread adapter bridging `blitz_dom::BaseDocument` and frame-settle queues | `blitz-host-protocol`, `blitz-host-transport`, `blitz-dom` |
 
 ---
@@ -73,25 +73,34 @@ let updated_snapshot = client.settle_until(Duration::from_secs(3), |snap| {
 
 ---
 
-## CLI Diagnostic Tool: `blitz-inspect`
+## Canonical CLI Control Tool: `blitz-host`
 
-`blitz-host-transport` includes a standalone CLI binary:
+`blitz-host-transport` provides the standalone `blitz-host` binary:
 
 ```bash
-cargo run -p blitz-host-transport --bin blitz-inspect
+# 1. Inspect live Blitz window (default)
+cargo run -p blitz-host-transport --bin blitz-host
+
+# 2. Output live DOM hierarchy as JSON
+cargo run -p blitz-host-transport --bin blitz-host -- --json
+
+# 3. Dispatch click action to a specific node on the live window
+cargo run -p blitz-host-transport --bin blitz-host -- click 4294967402
+
+# 4. View help
+cargo run -p blitz-host-transport --bin blitz-host -- --help
 ```
 
 Output:
 ```text
 =================================================================
-[blitz-inspect] Blitz Host Live Inspector
+[blitz-host] Blitz Host Live Inspector & Controller
 =================================================================
 Connected to host:
   • Renderer        : oxidase-native-runner v0.1.0
   • PID             : 9544
   • Socket Path     : /tmp/blitz-host/9544-1789997960602929000.sock
 -----------------------------------------------------------------
-Requesting semantic DOM snapshot via inspect()...
 Received typed InspectResponse:
   • Document ID: 1
   • Root ID    : 4294967297
