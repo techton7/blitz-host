@@ -15,8 +15,16 @@ authors = ["Techton <contact@techton.io>"]
 repository = "https://github.com/techton7/blitz-host"
 homepage = "https://github.com/techton7/blitz-host"
 
+[patch."https://github.com/techton7/blitz.git"]
+dioxus-native = { path = "../../blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../../blitz/packages/dioxus-native-dom" }
+blitz-shell = { path = "../../blitz/packages/blitz-shell" }
+blitz-dom = { path = "../../blitz/packages/blitz-dom" }
+blitz-traits = { path = "../../blitz/packages/blitz-traits" }
+blitz-paint = { path = "../../blitz/packages/blitz-paint" }
+
 [patch.crates-io]
-blitz-shell = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
-blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
-blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
-blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1" }
+blitz-shell = { path = "../../blitz/packages/blitz-shell" }
+blitz-dom = { path = "../../blitz/packages/blitz-dom" }
+blitz-traits = { path = "../../blitz/packages/blitz-traits" }
+blitz-paint = { path = "../../blitz/packages/blitz-paint" }

@@ -16,6 +16,15 @@ blitz-dom = { version = "0.3.0-beta.2", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# Optional Dioxus Native integration
+dioxus = { version = "0.7.10", default-features = false, features = ["hooks", "signals", "macro", "html"], optional = true }
+dioxus-native = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.1", optional = true }
+keyboard-types = { version = "0.7", optional = true }
+
+[features]
+default = []
+dioxus-native = ["dep:dioxus", "dep:dioxus-native", "dep:keyboard-types"]
+
 [[bin]]
 name = "blitz-host"
 path = "src/bin/blitz-host.rs"

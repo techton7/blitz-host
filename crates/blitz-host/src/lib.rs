@@ -15,7 +15,13 @@ pub use blitz_host_transport as transport;
 
 pub mod host;
 
-pub use host::HostControl;
+#[cfg(feature = "dioxus-native")]
+pub mod dioxus;
+
+pub use host::{init_if_debug, init_if_debug_default, HostControl};
+#[cfg(feature = "dioxus-native")]
+pub use dioxus::BlitzHost;
+
 pub use blitz_host_protocol::{
     ActionRequest, ActionResponse, ControlRequest, ControlResponse, HostDescriptor, InspectRequest,
     InspectResponse, SettleRequest, SettleResponse,
@@ -23,10 +29,13 @@ pub use blitz_host_protocol::{
 pub use blitz_host_transport::DebugClient;
 
 pub mod prelude {
-    pub use crate::host::HostControl;
+    pub use crate::host::{init_if_debug, init_if_debug_default, HostControl};
     pub use crate::protocol::{
         ActionRequest, ActionResponse, InspectRequest, InspectResponse, SettleRequest,
         SettleResponse,
     };
     pub use crate::client::DebugClient;
+
+    #[cfg(feature = "dioxus-native")]
+    pub use crate::dioxus::BlitzHost;
 }

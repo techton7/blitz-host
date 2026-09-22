@@ -135,3 +135,19 @@ impl HostControl {
         self.server.descriptor()
     }
 }
+
+/// Convenience function to initialize blitz-host debug control if requested via
+/// `--debug-control` CLI argument or `BLITZ_DEBUG_CONTROL` environment variable.
+pub fn init_if_debug(app_name: &str, app_version: &str) -> bool {
+    HostControl::init_global_if_requested(app_name, app_version)
+}
+
+/// Convenience function to initialize blitz-host debug control with default application name
+/// inferred from current executable if requested.
+pub fn init_if_debug_default() -> bool {
+    let app_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "blitz-app".to_string());
+    HostControl::init_global_if_requested(&app_name, "0.1.0")
+}
