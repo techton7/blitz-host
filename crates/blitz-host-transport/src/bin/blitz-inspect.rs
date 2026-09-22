@@ -10,10 +10,10 @@ use blitz_host_transport::DebugClient;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
-    let explicit_path = args.get(1).map(PathBuf::from);
+    let explicit_path = args.iter().find(|a| !a.starts_with("--") && a.ends_with(".json")).map(PathBuf::from);
 
     println!("=================================================================");
-    println!("[blitz-inspect] Blitz Host Live Inspector");
+    println!("[blitz-inspect] Blitz Host Live Inspector & Controller");
     println!("=================================================================");
 
     let mut client = match DebugClient::connect_discovered(explicit_path.as_deref()) {
@@ -33,6 +33,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  • Socket Path     : {}", desc.socket_path);
     println!("  • Protocol Version: {}", desc.protocol_version);
     println!("-----------------------------------------------------------------");
+
+    // Check for optional action flag: --click <node_id>
+    if let Some(pos) = args.iter().position(|a| a == "--click") {
+        if let Some(id_str) = args.get(pos + 1) {
+            let node_id: u64 = id_str.parse().expect("node_id must be a valid u64 integer");
+            println!("Dispatching click action to node #{} on live window...", node_id);
+            let act_res = client.click(node_id)?;
+            println!("  • Act response: success={}, message={:?}", act_res.success, act_res.message);
+            println!("Settling 2 frames on live window...");
+            let settle_res = client.settle(2)?;
+            println!("  • Settle response: settled={}, current_frame={}", settle_res.settled, settle_res.current_frame);
+            println!("-----------------------------------------------------------------");
+        }
+    }
 
     println!("Requesting semantic DOM snapshot via inspect()...");
     let response = client.inspect(InspectRequest::default())?;
