@@ -119,7 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `--debug-control` active.");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
                     std::process::exit(1);
                 }
             };
@@ -214,7 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `--debug-control` active.");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
                     std::process::exit(1);
                 }
             };

@@ -13,13 +13,13 @@ fn test_live_native_runner_attach_and_inspect() {
         return;
     }
 
-    println!("Starting oxidase-native-runner in --debug-control mode...");
+    println!("Starting oxidase-native-runner in feature-enabled dev mode (no --debug-control flag)...");
     let mut child = Command::new(runner_path)
-        .arg("--debug-control")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("failed to spawn oxidase-native-runner");
+
 
     let pid = child.id();
     println!("Spawned child process with PID: {}", pid);

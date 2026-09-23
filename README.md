@@ -103,8 +103,9 @@ Host applications can enable `blitz-host` debug control via the `HostControl` fa
 use blitz_host::HostControl;
 
 fn main() {
-    // 1. Starts UDS debug server if --debug-control or BLITZ_DEBUG_CONTROL=1 is set
-    HostControl::init_global_if_requested("my-app", env!("CARGO_PKG_VERSION"));
+    // 1. Starts UDS debug server (active by default in feature-enabled dev lane)
+    HostControl::init_global("my-app", env!("CARGO_PKG_VERSION"));
+
 
     dioxus::launch(App);
 }

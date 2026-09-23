@@ -18,19 +18,37 @@ pub struct HostControl {
 }
 
 impl HostControl {
-    /// Checks whether debug control was explicitly requested via `--debug-control` argument
-    /// or `BLITZ_DEBUG_CONTROL` environment variable.
-    pub fn is_requested() -> bool {
-        std::env::args().any(|arg| arg == "--debug-control")
-            || std::env::var("BLITZ_DEBUG_CONTROL").is_ok()
+    /// Checks whether debug control is enabled.
+    ///
+    /// In the feature-enabled development lane, debug control is active by default.
+    /// It can be explicitly suppressed via `--no-debug-control`, `BLITZ_DEBUG_CONTROL=0`,
+    /// or `BLITZ_HOST_DISABLED=1`.
+    pub fn is_enabled() -> bool {
+        if std::env::args().any(|arg| arg == "--no-debug-control") {
+            return false;
+        }
+        if let Ok(val) = std::env::var("BLITZ_DEBUG_CONTROL") {
+            if val == "0" || val.eq_ignore_ascii_case("false") {
+                return false;
+            }
+        }
+        if let Ok(val) = std::env::var("BLITZ_HOST_DISABLED") {
+            if val == "1" || val.eq_ignore_ascii_case("true") {
+                return false;
+            }
+        }
+        true
     }
 
-    /// Starts a local HostControl instance if requested by CLI argument or environment variable.
-    pub fn start_if_requested(app_name: &str, app_version: &str) -> Option<Self> {
-        if !Self::is_requested() {
-            return None;
-        }
+    /// Checks whether debug control is active or enabled.
+    ///
+    /// Backward-compatible alias for [`Self::is_enabled`].
+    pub fn is_requested() -> bool {
+        Self::is_enabled()
+    }
 
+    /// Starts a local HostControl instance directly.
+    pub fn start(app_name: &str, app_version: &str) -> Option<Self> {
         match DebugServer::start(app_name, app_version) {
             Ok((server, command_rx)) => {
                 println!("[blitz-host] Local debug control server initialized");
@@ -49,20 +67,37 @@ impl HostControl {
         }
     }
 
-    /// Initializes a process-global HostControl singleton if requested.
+    /// Starts a local HostControl instance if enabled in the development lane.
+    pub fn start_if_requested(app_name: &str, app_version: &str) -> Option<Self> {
+        if !Self::is_enabled() {
+            return None;
+        }
+        Self::start(app_name, app_version)
+    }
+
+    /// Initializes a process-global HostControl singleton if enabled.
     ///
-    /// Returns true if debug control was requested and successfully initialized.
-    pub fn init_global_if_requested(app_name: &str, app_version: &str) -> bool {
-        if !Self::is_requested() {
+    /// Returns true if debug control was successfully initialized or was already active.
+    pub fn init_global(app_name: &str, app_version: &str) -> bool {
+        if !Self::is_enabled() {
             return false;
         }
-        if let Some(ctrl) = Self::start_if_requested(app_name, app_version) {
+        if Self::is_global_active() {
+            return true;
+        }
+        if let Some(ctrl) = Self::start(app_name, app_version) {
             *GLOBAL_HOST_CONTROL.lock().unwrap() = Some(ctrl);
             true
         } else {
             false
         }
     }
+
+    /// Backward-compatible alias for [`Self::init_global`].
+    pub fn init_global_if_requested(app_name: &str, app_version: &str) -> bool {
+        Self::init_global(app_name, app_version)
+    }
+
 
     /// Checks if the process-global HostControl singleton is currently active.
     pub fn is_global_active() -> bool {
@@ -136,18 +171,27 @@ impl HostControl {
     }
 }
 
-/// Convenience function to initialize blitz-host debug control if requested via
-/// `--debug-control` CLI argument or `BLITZ_DEBUG_CONTROL` environment variable.
-pub fn init_if_debug(app_name: &str, app_version: &str) -> bool {
-    HostControl::init_global_if_requested(app_name, app_version)
-}
-
-/// Convenience function to initialize blitz-host debug control with default application name
-/// inferred from current executable if requested.
-pub fn init_if_debug_default() -> bool {
+/// Convenience function to initialize blitz-host debug control in the development lane.
+pub fn init_default() -> bool {
     let app_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "blitz-app".to_string());
-    HostControl::init_global_if_requested(&app_name, "0.1.0")
+    HostControl::init_global(&app_name, "0.1.0")
 }
+
+/// Convenience function to initialize blitz-host debug control with explicit metadata.
+pub fn init_global(app_name: &str, app_version: &str) -> bool {
+    HostControl::init_global(app_name, app_version)
+}
+
+/// Backward-compatible alias for [`init_global`].
+pub fn init_if_debug(app_name: &str, app_version: &str) -> bool {
+    HostControl::init_global(app_name, app_version)
+}
+
+/// Backward-compatible alias for [`init_default`].
+pub fn init_if_debug_default() -> bool {
+    init_default()
+}
+

@@ -1,4 +1,4 @@
-# Worker Instruction: Add a Canonical Cross-Host `oxidase` Example and Keep the Native Proof Harness
+# Worker Instruction: Remove `--debug-control` and Make `blitz-host` Always Available in the Feature-Enabled Dev Lane
 
 You are working in:
 
@@ -6,11 +6,16 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The `blitz-host` → `oxidase` boundary move is now established.
+The previous work established:
 
-The next architectural step is also fixed:
+1. `blitz-host` as a separate crate family
+2. `oxidase` as the ergonomic integration boundary
+3. a canonical cross-host example
+4. a native-specific proof harness
 
-> **`oxidase` should have a single canonical example that demonstrates the same app code path working on both Web and Native, while `oxidase-native-runner` remains as the native-specific proof harness.**
+The next direction is now fixed:
+
+> **in the development lane, if `blitz-host` is compiled in, access through `blitz-host` should just be available — no `--debug-control` runtime flag required**
 
 Write all agent-facing reasoning in English.
 
@@ -27,134 +32,121 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Deliver the correct split between:
+Remove the runtime `--debug-control` / `BLITZ_DEBUG_CONTROL` gating model from the current development/integration lane.
 
-1. **canonical cross-host consumer proof**
-2. **native-specific proof harness**
+The intended model is now:
 
-Specifically:
+1. **compile-time opt-in** via the `blitz-host` feature
+2. **always available at runtime** inside that feature-enabled development lane
 
-### A. Add or promote one `oxidase` example
+In other words:
 
-There should be a single canonical `oxidase` example that represents the actual product value proposition:
-
-> the same app code path works on both Web and Native through `oxidase`
-
-### B. Keep `oxidase-native-runner`
-
-Do **not** remove `oxidase-native-runner` in this pass.
-
-It should remain the place for:
-
-1. auto-close proof mode
-2. native-specific debug-control proof
-3. deterministic attach / inspect / click / settle verification
-4. proof-oriented logging and harness behavior
-
-The example and the runner serve different roles and should be treated that way.
-
-### C. Make the runner reproducible, not path-fragile
-
-If `oxidase-native-runner` is going to remain a durable proof harness, its canonical dependency story should prefer fixed refs:
-
-1. GitHub repository dependencies pinned by tag
-2. published versions where appropriate
-
-Local path overrides may still exist for active monorepo development convenience, but they must not be the only truth for the long-lived harness story if a more reproducible tagged path is intended.
+> if an app/example/harness is built with `oxidase` + `features = ["blitz-host"]`, then `blitz-host` access should be active by default in that dev lane without a separate runtime enable flag.
 
 ---
 
-## 2. The Intended Split
+## 2. Required Direction
 
-### Canonical `oxidase` example
+### A. Remove runtime flag dependence from the current dev story
 
-This should prove the public cross-host story:
+The current `--debug-control` / `BLITZ_DEBUG_CONTROL` gating should be removed from the active development workflow.
 
-1. same UI code
-2. Web support
-3. Native support
-4. `oxidase` ergonomics
-5. when relevant, `blitz-host`/`--debug-control` attach path on Native
+That means cleaning up code and docs that currently imply:
 
-### `oxidase-native-runner`
+1. feature compiled in
+2. but still a second runtime switch is needed just to make local attach possible
 
-This should remain the internal harness for native-specific proof:
+That is no longer the desired UX.
 
-1. proof mode
-2. auto-close mode
-3. attach/click/settle assertions
-4. native host/runtime-specific validation
+### B. Keep compile-time opt-in
 
-Do not confuse the two.
+This does **not** mean always-on for all builds everywhere.
 
----
+The boundary remains:
 
-## 3. Current Facts You Should Start From
+1. build with `blitz-host` feature → debug/control access is available
+2. build without `blitz-host` feature → no debug/control integration
 
-Unless reinspection disproves them:
+So the feature is still the opt-in.
 
-1. the `blitz-host` feature integration now lives at the `oxidase` boundary
-2. `oxidase-native-runner` no longer directly imports `blitz_host` in app code
-3. the native proof harness still exists and still matters
-4. what is missing now is the **canonical single example** that demonstrates the actual cross-host consumer story
-
-That is the problem this pass should solve.
+What is being removed is the **extra runtime toggle** in the normal development lane.
 
 ---
 
-## 4. Required Example Direction
+## 3. What This Means in Practice
 
-Create or promote one `oxidase` example under the `oxidase` crate that is the canonical cross-host sample.
+For the current `oxidase` ecosystem story, the desired development model becomes:
 
-It should be designed so that:
+```toml
+oxidase = { git = "...", tag = "...", features = ["native", "blitz-host"] }
+```
 
-1. the same app/component code is meaningful on Web
-2. the same app/component code is meaningful on Native
-3. the example demonstrates the core `oxidase` value, not random unrelated UI
+and then:
 
-### Preferred example characteristics
+```rust
+#[oxidase::main]
+fn main() {
+    dioxus::launch(App);
+}
+```
 
-The example should ideally show:
+with no further `--debug-control` requirement in ordinary development usage.
 
-1. `#[oxidase::main]`
-2. `use_frame`
-3. `next_frame`
-4. a small interactive state mutation that is visible in both Web and Native
-5. if native debug-control proof is exercised against it, a stable inspect/click target
-
-It does not need to become a huge showcase.
-
-Keep it small and representative.
+If the feature is present, the control plane should be available.
 
 ---
 
-## 5. Relationship Between Example and Runner
+## 4. Required Cleanup Targets
 
-The example and the runner should not drift into unrelated apps if avoidable.
+You must remove or rewrite the runtime-flag model across the current lane where appropriate.
 
-If helpful, extract shared app/UI logic so that:
+At minimum, inspect and update:
 
-1. the example is the canonical consumer story
-2. the runner reuses the same or very similar UI for proof-harness purposes
+1. `oxidase` integration code
+2. `blitz-host` host helpers
+3. canonical `cross_host` example
+4. `oxidase-native-runner`
+5. `blitz-host` CLI/help/docs/examples/results that instruct users to pass `--debug-control`
 
-This is preferred if it keeps maintenance low and avoids divergence.
+### Important note
 
-But do not force a bad abstraction if it becomes messy.
+If you keep any runtime switch at all, it must be for a different reason than merely “make blitz-host available in development.”
 
-The key requirement is conceptual alignment:
-
-> the runner should prove the same consumer story the example represents, while still adding native-specific proof machinery.
+For the current intended dev lane, feature presence should be enough.
 
 ---
 
-## 6. What Not to Do
+## 5. Canonical Story After This Change
 
-1. do not delete `oxidase-native-runner`
-2. do not let the runner remain the *only* place the cross-host value is shown
-3. do not add multiple competing examples if one canonical example is enough
-4. do not turn this into a large demo gallery
+You must make the story explicit and consistent:
 
-This pass is about clarifying the architecture, not multiplying surfaces.
+### Canonical cross-host example
+
+If built with `blitz-host` feature:
+
+1. Web/native example runs normally
+2. Native debug attach is already available
+3. no extra `--debug-control` argument is needed
+
+### Native proof harness
+
+If built with `blitz-host` feature:
+
+1. the harness should already be attachable
+2. tests should not require an extra runtime enable flag merely to expose the control plane
+
+---
+
+## 6. What Not to Break
+
+Do not break:
+
+1. the `blitz-host` / `oxidase` boundary
+2. the canonical cross-host example
+3. the native proof harness
+4. attach / inspect / click / settle / changed-state proof
+
+The goal is to simplify enablement, not reduce functionality.
 
 ---
 
@@ -163,34 +155,29 @@ This pass is about clarifying the architecture, not multiplying surfaces.
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
-6. the runner/example dependency wiring (`Cargo.toml`, feature flags, git tag pins, patch overrides)
-
-Reinspect enough surrounding code before deciding whether to add a new example or refactor an existing one into the canonical example.
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/launch.rs`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/prelude.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-macro/src/main_macro.rs`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/main.rs`
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/src/main.rs`
+8. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
+9. tests that currently spawn or launch with `--debug-control`
 
 ---
 
 ## 8. Validation You Must Run
 
-Run the smallest commands that prove the example/runner split is real.
+Run the smallest commands that prove the new always-available dev-lane story is real.
 
 At minimum:
 
-1. relevant `cargo check` / `cargo test` for `util/blitz-host`
-2. compile validation for the chosen `oxidase` example
-3. native validation for the example if you wire it that far
-4. continued proof that `oxidase-native-runner` still works as the native-specific harness
-5. evidence that the runner’s intended long-lived proof path is pinned to stable refs/tags rather than being silently dependent on local path state, if you change that wiring in this pass
+1. validate the canonical `cross_host` example in the feature-enabled native lane **without** `--debug-control`
+2. validate the native proof harness attach path **without** `--debug-control`
+3. run the `blitz-host` test suite after the change
+4. confirm attach / inspect / click / settle / changed-state proof still works
 
-If the example is intended to be the actual cross-host canonical sample, validate both:
-
-1. Web compilation/path
-2. Native compilation/path
-
-Do not call this complete if only one host path works.
+If Web/native example validation is part of the current slice, keep both honest.
 
 If markdown files are edited, validate them.
 
@@ -204,24 +191,22 @@ Update:
 
 It must explicitly record:
 
-1. what canonical `oxidase` example now represents the cross-host story
-2. whether shared example/runner app logic was extracted
-3. what role remains for `oxidase-native-runner`
-4. whether the runner dependency story was moved to stable GitHub tags / versions or remains path-bound, and why
-5. how Web and Native were each validated
-6. what still remains unresolved
+1. what runtime gating was removed
+2. what compile-time gating remains
+3. how the example and harness are now activated in the feature-enabled lane
+4. what commands were used to prove attachability without `--debug-control`
+5. what still remains unresolved
 
 ---
 
 ## 10. Final Verdict Rule
 
-You may report **Implemented and directionally clarified** only if:
+You may report **Implemented and simplified** only if:
 
-1. `oxidase` now has one canonical cross-host example (or an existing one is clearly promoted/refactored into that role)
-2. `oxidase-native-runner` is still present as the native-specific proof harness
-3. the difference between example and runner is explicit and justified
-4. the runner’s durable proof path is either made more reproducible or any remaining path-bound state is explicitly justified
-5. the example’s Web and Native paths are both validated honestly
+1. the current dev lane no longer needs `--debug-control` merely to make `blitz-host` available
+2. feature-enabled builds are attachable by default in the intended lane
+3. the example and runner stories remain honest and working
+4. the proof path still works end to end
 
 Otherwise report:
 
@@ -231,4 +216,4 @@ or
 
 The purpose of this pass is:
 
-> make the cross-host consumer story visible in an `oxidase` example, while keeping the native-specific proof burden in the runner.
+> make `blitz-host` availability automatic in the feature-enabled development lane, instead of requiring an extra runtime opt-in flag.

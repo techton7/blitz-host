@@ -35,27 +35,24 @@ use crate::host::HostControl;
 /// Root wrapper component that automatically injects `blitz-host` debug control
 /// into a Dioxus Native application.
 ///
-/// When debug control is active (`--debug-control` or `BLITZ_DEBUG_CONTROL=1`):
+/// In the feature-enabled development lane (`feature = "blitz-host"`):
 /// 1. Captures the live window `NodeHandle` from the root mounted DOM element with
 ///    zero layout interference (`display: contents;`).
 /// 2. Hooks into `WindowEvent::RedrawRequested` to automatically service pending debug
 ///    control requests on the main UI thread right before each frame.
 /// 3. Automatically handles synthetic action dispatches (such as click events).
 ///
-/// When debug control is not active, this component simply renders `children` with
-/// zero overhead.
+/// When debug control is suppressed (via `--no-debug-control` or `BLITZ_DEBUG_CONTROL=0`),
+/// this component simply renders `children` with zero overhead.
 #[component]
 pub fn BlitzHost(children: Element) -> Element {
-    // Attempt automatic fallback initialization if debug was requested but not explicitly initialized in main()
+    // Attempt automatic fallback initialization if not already initialized
     use_hook(|| {
-        if !HostControl::is_global_active() && HostControl::is_requested() {
-            let app_name = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
-                .unwrap_or_else(|| "blitz-app".to_string());
-            HostControl::init_global_if_requested(&app_name, "0.1.0");
+        if !HostControl::is_global_active() && HostControl::is_enabled() {
+            crate::host::init_default();
         }
     });
+
 
     let live_handle = use_hook(|| Rc::new(std::cell::RefCell::new(None::<dioxus_native::NodeHandle>)));
     let handle_for_mount = live_handle.clone();
