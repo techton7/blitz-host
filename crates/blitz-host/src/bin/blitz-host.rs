@@ -18,6 +18,7 @@ USAGE:
 SUBCOMMANDS:
     list [OPTIONS]                 List active, reachable Blitz desktop host processes
     inspect [OPTIONS]              Inspect live window semantic DOM & layout tree
+    capture [OPTIONS]              Capture live rendered visual screenshot (PNG)
     click <NODE_ID> [OPTIONS]       Dispatch a synthetic click action to target element (auto-settles)
     focus <NODE_ID> [OPTIONS]       Focus target element (auto-settles)
     set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles)
@@ -37,6 +38,11 @@ EXAMPLES:
     blitz-host inspect --pid 37462
     blitz-host inspect --json
 
+    # Capture visual screenshot (PNG)
+    blitz-host capture
+    blitz-host capture --pid 37462
+    blitz-host capture -o screenshot.png --pid 37462
+
     # Click a node
     blitz-host click 4294967402
     blitz-host click 4294967402 --pid 37462
@@ -46,6 +52,36 @@ EXAMPLES:
 
     # Set value on an input node
     blitz-host set-value 4294967405 "Hello Blitz" --pid 37462
+"#
+    );
+}
+
+fn print_capture_help() {
+    println!(
+        r#"blitz-host-capture: Capture live rendered visual screenshot (PNG).
+
+USAGE:
+    blitz-host capture [OPTIONS] [DESCRIPTOR_PATH]
+
+OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+    -o, --output <PATH>      Output PNG file path (defaults to blitz-capture-<PID>.png)
+        --json               Output capture response as JSON with base64 data
+    -h, --help               Print help information
+
+ARGUMENTS:
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON file or UDS socket.
+                             If omitted, auto-discovers the active running Blitz window.
+
+EXAMPLES:
+    # 1. Capture visual screenshot and save to default file (blitz-capture-<PID>.png)
+    blitz-host capture
+
+    # 2. Capture and save to explicit file path
+    blitz-host capture -o screenshot.png --pid 37462
+
+    # 3. Output capture response as JSON
+    blitz-host capture --json --pid 37462
 "#
     );
 }
@@ -208,6 +244,21 @@ fn parse_window_arg(args: &[String]) -> Option<u64> {
         }
         if let Some(rest) = args[i].strip_prefix("--window-id=") {
             return rest.parse().ok();
+        }
+    }
+    None
+}
+
+fn parse_output_arg(args: &[String]) -> Option<PathBuf> {
+    for i in 0..args.len() {
+        if (args[i] == "-o" || args[i] == "--output") && i + 1 < args.len() {
+            return Some(PathBuf::from(&args[i + 1]));
+        }
+        if let Some(rest) = args[i].strip_prefix("--output=") {
+            return Some(PathBuf::from(rest));
+        }
+        if let Some(rest) = args[i].strip_prefix("-o=") {
+            return Some(PathBuf::from(rest));
         }
     }
     None
@@ -389,6 +440,80 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("=================================================================");
             println!("[blitz-host] Inspection completed successfully!");
+            Ok(())
+        }
+        "capture" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_capture_help();
+                return Ok(());
+            }
+
+            let is_json = subargs.iter().any(|a| a == "--json");
+            let output_path = parse_output_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("Error connecting to Blitz host: {err}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            let pid = client.descriptor().pid;
+            let resp = match client.capture() {
+                Ok(r) => r,
+                Err(err) => {
+                    eprintln!("Error capturing visual screenshot: {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            if is_json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+                return Ok(());
+            }
+
+            if !resp.success {
+                eprintln!(
+                    "Capture failed: {}",
+                    resp.message.as_deref().unwrap_or("unknown error")
+                );
+                std::process::exit(1);
+            }
+
+            use base64::prelude::*;
+            let png_bytes = match BASE64_STANDARD.decode(&resp.data_base64) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("Error decoding PNG base64 payload: {e}");
+                    std::process::exit(1);
+                }
+            };
+
+            let target_file = output_path.unwrap_or_else(|| {
+                PathBuf::from(format!("blitz-capture-{pid}.png"))
+            });
+
+            if let Some(parent) = target_file.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            std::fs::write(&target_file, &png_bytes)?;
+
+            println!("=================================================================");
+            println!("[blitz-host] Visual Screenshot Captured");
+            println!("=================================================================");
+            println!("  • Process PID : {}", pid);
+            println!("  • Resolution  : {}x{} physical pixels", resp.width, resp.height);
+            println!("  • Format      : {}", resp.format.to_uppercase());
+            println!("  • Size        : {} bytes", png_bytes.len());
+            println!("  • Saved To    : {}", target_file.display());
+            println!("=================================================================");
             Ok(())
         }
         "click" => {

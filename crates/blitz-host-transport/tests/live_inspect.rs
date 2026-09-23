@@ -306,11 +306,44 @@ fn test_live_native_runner_attach_and_inspect() {
     println!("  • Final typed text after settle_until: {:?}", final_typed_text);
     assert_eq!(final_typed_text.as_deref(), Some(expected_p_text2.as_str()));
 
+    // =========================================================================
+    // STEP 9: Visual Capture Proof (Live Visual Screenshot PNG)
+    // =========================================================================
+    println!("Capturing visual screenshot from live native host...");
+    let cap_resp = client.capture().expect("capture request failed");
+    println!(
+        "Capture Response: success={}, dimensions={}x{}, format={:?}, base64_len={}",
+        cap_resp.success, cap_resp.width, cap_resp.height, cap_resp.format, cap_resp.data_base64.len()
+    );
+    assert!(cap_resp.success, "capture response must indicate success");
+    assert!(cap_resp.width > 0, "captured width must be greater than zero");
+    assert!(cap_resp.height > 0, "captured height must be greater than zero");
+    assert_eq!(cap_resp.format, "png");
+
+    let png_bytes = client.capture_png().expect("capture_png must succeed");
+    assert!(png_bytes.len() > 8);
+    assert_eq!(
+        &png_bytes[0..4],
+        &[0x89, b'P', b'N', b'G'],
+        "CRITICAL PROOF: Captured visual payload must start with valid PNG header magic bytes"
+    );
+
+    // Test capture_to_file
+    let proof_artifact_path = std::path::PathBuf::from("target/live_proof_artifact.png");
+    let (w, h, saved_path) = client
+        .capture_to_file(&proof_artifact_path)
+        .expect("capture_to_file must succeed");
+    println!("  • Wrote visual proof PNG to {} ({}x{})", saved_path.display(), w, h);
+    assert!(saved_path.exists());
+    let file_size = std::fs::metadata(&saved_path).unwrap().len();
+    println!("  • Live proof PNG size: {} bytes", file_size);
+    assert!(file_size > 100, "captured PNG file size must be substantial");
+
     // Terminate child process cleanly
     let _ = child.kill();
     let _ = child.wait();
 
     println!("=================================================================");
-    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, AND SETTLE PROOF PASSED 100%!");
+    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, CAPTURE PROOF PASSED 100%!");
     println!("=================================================================");
 }

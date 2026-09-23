@@ -93,6 +93,11 @@ impl HostBridge {
                         requested_frames,
                     });
                 }
+                ControlRequest::Capture(capture_req) => {
+                    let response = crate::capture::capture_document(doc, capture_req.clone());
+                    bridge_req.respond(ControlResponse::CaptureSuccess(response));
+                    serviced += 1;
+                }
             }
         }
 

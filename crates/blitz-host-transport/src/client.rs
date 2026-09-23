@@ -1,11 +1,13 @@
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use base64::prelude::*;
 use blitz_host_protocol::{
-    ActionRequest, ActionResponse, ControlRequest, ControlResponse, HostDescriptor,
-    InspectRequest, InspectResponse, SettleRequest, SettleResponse,
+    ActionRequest, ActionResponse, CaptureRequest, CaptureResponse, ControlRequest,
+    ControlResponse, HostDescriptor, InspectRequest, InspectResponse, SettleRequest,
+    SettleResponse,
 };
 
 /// Client used by agents or test runners to interact with a live running Blitz host.
@@ -151,6 +153,58 @@ impl DebugClient {
                 "Unexpected response variant for settle: {other:?}"
             ))),
         }
+    }
+
+    /// Capture visual screenshot of the document/window on the default/primary window.
+    pub fn capture(&mut self) -> io::Result<CaptureResponse> {
+        self.capture_window(None)
+    }
+
+    /// Capture visual screenshot of the document/window on a targeted window (or primary if None).
+    pub fn capture_window(&mut self, window_id: Option<u64>) -> io::Result<CaptureResponse> {
+        match self.send_request(ControlRequest::Capture(CaptureRequest { window_id }))? {
+            ControlResponse::CaptureSuccess(cap_resp) => Ok(cap_resp),
+            ControlResponse::Error(err) => Err(io::Error::other(err)),
+            other => Err(io::Error::other(format!(
+                "Unexpected response variant for capture: {other:?}"
+            ))),
+        }
+    }
+
+    /// Capture visual screenshot and decode into raw PNG image bytes.
+    pub fn capture_png(&mut self) -> io::Result<Vec<u8>> {
+        let resp = self.capture()?;
+        if !resp.success {
+            return Err(io::Error::other(
+                resp.message.unwrap_or_else(|| "Capture failed without message".into()),
+            ));
+        }
+        BASE64_STANDARD
+            .decode(&resp.data_base64)
+            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))
+    }
+
+    /// Capture visual screenshot and write directly to `path`.
+    ///
+    /// Returns `(width, height, path)` on success.
+    pub fn capture_to_file(&mut self, path: impl AsRef<Path>) -> io::Result<(u32, u32, PathBuf)> {
+        let resp = self.capture()?;
+        if !resp.success {
+            return Err(io::Error::other(
+                resp.message.unwrap_or_else(|| "Capture failed without message".into()),
+            ));
+        }
+        let png_bytes = BASE64_STANDARD
+            .decode(&resp.data_base64)
+            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))?;
+
+        let target_path = path.as_ref().to_path_buf();
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&target_path, &png_bytes)?;
+
+        Ok((resp.width, resp.height, target_path))
     }
 
     /// Settle and inspect iteratively until `condition` is satisfied or `timeout` expires.

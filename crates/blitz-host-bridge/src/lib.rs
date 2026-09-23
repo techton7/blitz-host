@@ -4,9 +4,11 @@
 //! to the blitz-host control plane.
 
 pub mod bridge;
+pub mod capture;
 pub mod inspect;
 
 pub use bridge::HostBridge;
+pub use capture::{capture_document, capture_document_png};
 pub use inspect::inspect_document;
 
 #[cfg(test)]
@@ -69,5 +71,49 @@ mod tests {
         let inspected = inspect_document(&doc, InspectRequest::default());
         assert_eq!(inspected.focused_node_id, Some(root_id.as_u64()));
         assert_eq!(inspected.nodes[0].focused, Some(true));
+    }
+
+    #[test]
+    fn test_bridge_capture_document() {
+        use std::sync::mpsc::{channel, sync_channel};
+        use blitz_host_protocol::{CaptureRequest, ControlRequest, ControlResponse};
+        use blitz_host_transport::ControlBridgeRequest;
+
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+
+        // Test direct helper
+        let (width, height, png_bytes) = capture_document_png(&mut doc).expect("capture_document_png must succeed");
+        assert!(width > 0 && height > 0);
+        assert!(png_bytes.len() > 8);
+        assert_eq!(&png_bytes[0..4], &[0x89, b'P', b'N', b'G'], "must start with PNG magic bytes");
+
+        // Test IPC bridge routing
+        let (tx, rx) = channel::<ControlBridgeRequest>();
+        let mut bridge = HostBridge::new(rx);
+
+        let (cap_resp_tx, cap_resp_rx) = sync_channel(1);
+        tx.send(ControlBridgeRequest {
+            request: ControlRequest::Capture(CaptureRequest::default()),
+            reply: cap_resp_tx,
+        }).unwrap();
+
+        let serviced = bridge.poll_and_service_with(&mut doc, 1, |_, _| {
+            Err("no actions".into())
+        });
+        assert_eq!(serviced, 1);
+
+        let resp = cap_resp_rx.recv().unwrap();
+        match resp {
+            ControlResponse::CaptureSuccess(cap) => {
+                assert!(cap.success);
+                assert_eq!(cap.format, "png");
+                assert_eq!(cap.width, width);
+                assert_eq!(cap.height, height);
+                use base64::prelude::*;
+                let decoded = BASE64_STANDARD.decode(&cap.data_base64).unwrap();
+                assert_eq!(decoded, png_bytes);
+            }
+            other => panic!("expected CaptureSuccess, got {other:?}"),
+        }
     }
 }

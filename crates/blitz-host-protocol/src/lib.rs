@@ -164,6 +164,34 @@ pub struct SettleResponse {
     pub current_frame: u64,
 }
 
+/// Request to capture a visual screenshot of the rendered document/window.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureRequest {
+    /// Optional target window handle (falls back to primary window if None).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<u64>,
+}
+
+/// Result of capturing a visual screenshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureResponse {
+    /// Whether capture was successful.
+    pub success: bool,
+    /// Rendered image width in physical pixels.
+    pub width: u32,
+    /// Rendered image height in physical pixels.
+    pub height: u32,
+    /// Image format (e.g. "png").
+    pub format: String,
+    /// Base64-encoded image payload bytes.
+    pub data_base64: String,
+    /// Optional status or failure message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// Top-level control request envelope forwarded across the transport.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
@@ -174,6 +202,8 @@ pub enum ControlRequest {
     Act(ActionRequest),
     /// Settle execution for a specific number of frames.
     Settle(SettleRequest),
+    /// Capture a visual screenshot of the document/window.
+    Capture(CaptureRequest),
 }
 
 /// Top-level control response envelope sent back across the transport.
@@ -187,6 +217,8 @@ pub enum ControlResponse {
     ActionSuccess(ActionResponse),
     /// Successful settlement of frames.
     SettleSuccess(SettleResponse),
+    /// Successful visual capture.
+    CaptureSuccess(CaptureResponse),
     /// Error encountered during request processing.
     Error(String),
 }
@@ -307,5 +339,27 @@ mod tests {
         let settle_resp_json = serde_json::to_string(&settle_resp).unwrap();
         let settle_resp_parsed: ControlResponse = serde_json::from_str(&settle_resp_json).unwrap();
         assert_eq!(settle_resp, settle_resp_parsed);
+
+        // Test Capture roundtrip
+        let cap_req = ControlRequest::Capture(CaptureRequest {
+            window_id: Some(99),
+        });
+        let cap_req_json = serde_json::to_string(&cap_req).unwrap();
+        assert!(cap_req_json.contains("\"type\":\"capture\""));
+        let cap_req_parsed: ControlRequest = serde_json::from_str(&cap_req_json).unwrap();
+        assert_eq!(cap_req, cap_req_parsed);
+
+        let cap_resp = ControlResponse::CaptureSuccess(CaptureResponse {
+            success: true,
+            width: 800,
+            height: 600,
+            format: "png".into(),
+            data_base64: "iVBORw0KGgoAAAANSUhEUg==".into(),
+            message: Some("Screenshot captured".into()),
+        });
+        let cap_resp_json = serde_json::to_string(&cap_resp).unwrap();
+        assert!(cap_resp_json.contains("\"status\":\"captureSuccess\""));
+        let cap_resp_parsed: ControlResponse = serde_json::from_str(&cap_resp_json).unwrap();
+        assert_eq!(cap_resp, cap_resp_parsed);
     }
 }

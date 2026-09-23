@@ -1,4 +1,4 @@
-# Worker Instruction: Extend `blitz-host` with `Focus` + `SetValue` and Prove It Through a Three-Stage Test Route
+# Worker Instruction: Add a Minimal `capture` / Visual Proof Lane to `blitz-host`
 
 You are working in:
 
@@ -6,17 +6,19 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current `blitz-host` stack has already proven:
+The current stack already proves:
 
 1. attach
 2. inspect
 3. click
-4. settle
-5. deterministic process targeting (`list` + `--pid`)
+4. focus
+5. set-value
+6. settle
+7. deterministic process targeting
 
-The next slice is now:
+The next major `blitz-host`-specific value is now:
 
-> **move from “can click a button” to “can drive a real input workflow”**
+> **visual proof beyond semantic DOM — a minimal capture path**
 
 Write all agent-facing reasoning in English.
 
@@ -33,156 +35,147 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Add the next practical input/control surface to `blitz-host`:
+Implement the smallest useful visual capture lane for `blitz-host`.
 
-1. `Focus`
-2. `SetValue`
+This should let an external client prove not only:
 
-and prove that they work through the full stack.
+1. what the semantic tree says
+2. what the input state says
 
-The proof target is:
+but also:
 
-> a live host can be attached, the right input can be focused, a value can be injected, the UI can settle, and the changed state can be observed through inspect.
+3. what the rendered output actually looks like
+
+The core question is:
+
+> can `blitz-host` capture a real visual result from the running native host in a way that is useful for debugging and proof?
 
 ---
 
 ## 2. Scope Boundary
 
-This pass is intentionally **not** the full input matrix.
+Keep this slice intentionally small.
 
-### Must implement
+### Must aim for
 
-1. focus action
-2. set-value action
-3. whatever bridge/runtime support is needed for those actions
-4. a real inspect-visible proof target for the new workflow
+1. one-shot capture
+2. a useful output format
+3. proof against a live native host
 
 ### Explicitly defer
 
-Do **not** expand further unless nearly free:
+Do **not** expand into:
 
-1. generalized keyboard sequence matrix
-2. drag / hover / pointer move
-3. scroll
-4. capture
-5. broad diagnostics
+1. streaming/video
+2. diff engines
+3. per-node region capture unless almost free
+4. large visual tooling suite
+5. keyboard matrix expansion in this pass
 
-Keep the slice narrow and finish the real workflow proof.
-
----
-
-## 3. Current Facts You Should Start From
-
-Unless reinspection disproves them:
-
-1. process-level attach/selection is already working
-2. click + settle proof is already working
-3. `cross_host` is now the canonical cross-host example
-4. `oxidase-native-runner` remains the native-specific proof harness
-5. the next value jump is real text/input workflow control, not more selector bikeshedding
-
-That is the next problem to solve.
+This pass is about the first real visual proof seam.
 
 ---
 
-## 4. Required Action Surface
+## 3. Preferred Minimal Outcome
 
-Extend the current action vocabulary with the minimum useful next actions.
+The preferred first capture target is:
 
-### A. `Focus`
+1. capture the current rendered window/document view
+2. return it in a practical machine-usable format
+3. prove it against a running native host
 
-This should allow the client to target a focusable node and make it the active element.
+Reasonable output forms include:
 
-### B. `SetValue`
+1. PNG bytes
+2. base64-encoded image payload
+3. a file output path written by the CLI if that is the cleanest practical surface
 
-This should allow the client to set text/input value on a target element through the real event/runtime path, not via fake test-only mutation shortcuts.
-
-### Important rule
-
-The implementation must preserve the philosophy already established:
-
-> use the real native / Dioxus event plumbing where possible, not a separate fake state channel.
+Pick the smallest honest form that fits the current renderer/runtime seams.
 
 ---
 
-## 5. Required Proof Target
+## 4. Architectural Guidance
 
-You need a real, inspect-visible workflow target.
+### A. Treat capture as a `blitz-host` concern
 
-Add or adapt the canonical app/harness UI so that the new workflow can be proven clearly.
+This is exactly the kind of feature that is more `blitz-host`-specific than `blitz`-generic:
 
-Reasonable shape:
+1. transporting proof artifacts
+2. turning renderer state into debug-observable output
+3. exposing that through CLI/client APIs
 
-1. input field with stable ID (for example `id="test-input"`)
-2. inspect-visible derived state (for example `Typed: hello`)
-3. optional secondary control like a submit button if needed
+So this is a better next expansion than a giant keyboard behavior matrix.
 
-The proof must demonstrate:
+### B. Stay honest about what seam you use
 
-1. locate the input via inspect
-2. focus it
-3. set its value
-4. settle / wait as needed
-5. re-inspect and confirm the updated visible state
+If the current stack only allows:
 
-Do not stop at “action call returned success.”
+1. window-level full capture
+2. or host-level framebuffer capture
 
-The proof is the changed state.
+then implement that and say so.
+
+Do not imply subtree or exact per-node screenshots unless you really have them.
+
+### C. If blocked, produce a real blocker
+
+If direct capture is not honestly implementable with the current Blitz/Vello/runtime seams, do not fake it.
+
+Instead:
+
+1. inspect the available renderer/readback hooks
+2. attempt the smallest honest implementation
+3. if blocked, report the concrete seam missing
+
+This is acceptable if the evidence is solid.
 
 ---
 
-## 6. Required Three-Stage Test Route
+## 5. Suggested Implementation Shape
 
-This pass must follow the agreed testing route.
+If feasible, the likely path is:
 
-### Stage 1 — protocol / transport unit route
+1. protocol:
+   - add `CaptureRequest`
+   - add `CaptureResponse`
+2. bridge / host:
+   - invoke the smallest available native capture/readback path
+3. transport/client:
+   - expose `capture(...)`
+4. CLI:
+   - add `blitz-host capture`
+   - optionally write to a file or stdout/json depending on the cleanest UX
 
-Validate:
+Keep the user-facing interface small and practical.
 
-1. serde roundtrip for new action types
-2. transport/client response handling
-3. no regression in attach / selector model
+---
 
-### Stage 2 — headless semantics route
+## 6. Proof Targets
 
-Use the cheapest honest route available (for example `blitz-test-harness` or an equivalent minimal document-level harness) to verify the event semantics themselves:
+Use the existing established lanes:
 
-1. focus is really applied
-2. set-value follows the real path you intend
-3. the expected DOM/semantic state changes happen after pump/tick/settle
+### A. Canonical cross-host example
 
-This stage exists to catch event/model issues before the expensive live native run.
+Use `cross_host` as the first conceptual proof target when appropriate.
 
-### Stage 3 — live native E2E route
+### B. Native proof harness
 
-Final proof must happen against live running native targets.
+Use `oxidase-native-runner` as the native proof harness if it is the easiest place to verify capture correctness and stability.
 
-#### Preferred first proof target
-
-1. canonical `cross_host` example
-
-#### Secondary / harness proof target
-
-2. `oxidase-native-runner`
-
-The point is:
-
-> public consumer story first, harness story second.
+If one target is clearly more practical for the first capture proof, use it first and explain why.
 
 ---
 
 ## 7. What Not to Do
 
-1. do not jump straight to keyboard matrix complexity
-2. do not skip the headless semantics route if it can cheaply falsify wrong event plumbing
-3. do not replace inspect-visible proof with “action returned success”
-4. do not turn this into a generic form automation platform in one pass
+1. do not overpromise subtree capture if you only have full-window capture
+2. do not treat semantic inspection and capture as the same thing
+3. do not skip proof and stop at a compile-only transport shape
+4. do not turn this into a giant media/export subsystem
 
-This slice is:
+Keep it to:
 
-> focus + set-value + real proof
-
-no more.
+> first honest visual proof
 
 ---
 
@@ -195,25 +188,20 @@ At minimum:
 3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
 4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
 5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/`
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
-8. any available headless harness/utilities that can cheaply validate focus/value semantics
+6. relevant renderer / Vello / Blitz host seams that could support capture or readback
 
 ---
 
 ## 9. Validation You Must Run
 
-Run the smallest commands that honestly prove the slice.
+Run the smallest commands that honestly prove the capture lane.
 
 At minimum:
 
-1. protocol / transport tests for the new action types
-2. a headless semantics proof route (if available and honest)
-3. live native E2E against `cross_host`
-4. continued or secondary proof against `oxidase-native-runner`
-5. confirmation that attach / inspect / click / settle still work after the change
-
-Do not call this complete if only the unit tests pass.
+1. protocol / transport tests for the new capture surface
+2. any renderer-side or bridge-side focused checks needed for capture
+3. live native proof against a running host
+4. confirmation that existing attach / inspect / click / focus / set-value flows still work
 
 If markdown files are edited, validate them.
 
@@ -227,12 +215,12 @@ Update:
 
 It must explicitly record:
 
-1. what new actions were added
-2. how focus/value semantics are implemented
-3. what headless semantics route was used (or why it was unavailable)
-4. how the live E2E proof was run against `cross_host`
-5. what role `oxidase-native-runner` played in the proof
-6. what remains deferred
+1. what capture surface was added
+2. what exactly is captured (full window, document, etc.)
+3. what format is returned or written
+4. what live proof was observed
+5. what remains deferred
+6. if blocked, the exact renderer/runtime seam that blocked honest capture
 
 ---
 
@@ -240,11 +228,10 @@ It must explicitly record:
 
 You may report **Implemented and proven** only if:
 
-1. `Focus` is real
-2. `SetValue` is real
-3. changed state is proven through inspect after settle
-4. the three-stage test route is followed honestly enough to justify the claim
-5. existing attach / inspect / click / settle functionality still works
+1. a real capture surface exists
+2. it works against a live native host
+3. its scope is stated honestly
+4. the existing control-plane proof path still works
 
 Otherwise report:
 
@@ -254,4 +241,4 @@ or
 
 The purpose of this pass is:
 
-> make `blitz-host` capable of driving real input workflows, not just button clicks.
+> give `blitz-host` its first real visual proof capability beyond semantic DOM inspection.

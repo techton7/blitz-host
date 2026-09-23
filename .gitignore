@@ -1,5 +1,7 @@
-/target
+target/
 .DS_Store
 *.swp
 *.sock
+*.png
+artifacts/
 reference/
