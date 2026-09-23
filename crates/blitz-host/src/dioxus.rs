@@ -99,6 +99,9 @@ pub fn BlitzHost(children: Element) -> Element {
             onmounted: move |evt: Event<MountedData>| {
                 if let Some(handle) = evt.downcast::<dioxus_native::NodeHandle>() {
                     *handle_for_mount.borrow_mut() = Some(handle.clone());
+                    let doc_id = handle.doc().id();
+                    let win_id = u64::from(window.id());
+                    HostControl::set_global_primary_window(Some(win_id), Some(doc_id));
                 }
             },
             {children}

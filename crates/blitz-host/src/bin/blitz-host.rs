@@ -1,11 +1,11 @@
 //! # blitz-host
 //!
 //! Canonical CLI control plane and inspection tool for live Blitz desktop applications.
-//! Provides out-of-process inspection and action dispatching.
+//! Provides out-of-process inspection, process listing, and action dispatching.
 
 use std::path::PathBuf;
 
-use blitz_host::client::DebugClient;
+use blitz_host::client::{DebugClient, TargetSelector};
 use blitz_host::protocol::InspectRequest;
 
 fn print_main_help() {
@@ -16,8 +16,9 @@ USAGE:
     blitz-host <SUBCOMMAND>
 
 SUBCOMMANDS:
+    list [OPTIONS]           List active, reachable Blitz desktop host processes
     inspect [OPTIONS]        Inspect live window semantic DOM & layout tree
-    click <NODE_ID>          Dispatch a synthetic click action to target element (auto-settles)
+    click <NODE_ID> [OPTIONS] Dispatch a synthetic click action to target element (auto-settles)
 
 OPTIONS:
     -h, --help               Print help information
@@ -26,9 +27,38 @@ OPTIONS:
 Run 'blitz-host <SUBCOMMAND> --help' for more information on a specific subcommand.
 
 EXAMPLES:
+    # List active hosts
+    blitz-host list
+
+    # Inspect the default or targeted host
     blitz-host inspect
+    blitz-host inspect --pid 37462
     blitz-host inspect --json
+
+    # Click a node
     blitz-host click 4294967402
+    blitz-host click 4294967402 --pid 37462
+"#
+    );
+}
+
+fn print_list_help() {
+    println!(
+        r#"blitz-host-list: List active, reachable Blitz desktop host processes.
+
+USAGE:
+    blitz-host list [OPTIONS]
+
+OPTIONS:
+        --json               Output list in raw JSON format (for jq / AI agents)
+    -h, --help               Print help information
+
+EXAMPLES:
+    # 1. Print formatted human-readable table of running hosts
+    blitz-host list
+
+    # 2. Output running hosts as JSON
+    blitz-host list --json
 "#
     );
 }
@@ -41,21 +71,26 @@ USAGE:
     blitz-host inspect [OPTIONS] [DESCRIPTOR_PATH]
 
 OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
         --json               Output inspected tree in raw JSON format (for jq / AI agents)
     -h, --help               Print help information
 
 ARGUMENTS:
-    [DESCRIPTOR_PATH]        Path to host descriptor JSON file.
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON file or UDS socket.
                              If omitted, auto-discovers the active running Blitz window.
 
 EXAMPLES:
     # 1. Print formatted human-readable DOM tree with layout bounds
     blitz-host inspect
 
-    # 2. Output full semantic DOM snapshot as JSON
+    # 2. Target a specific process ID
+    blitz-host inspect --pid 37462
+
+    # 3. Output full semantic DOM snapshot as JSON
     blitz-host inspect --json
 
-    # 3. Connect to an explicit host descriptor file
+    # 4. Connect to an explicit host descriptor file
     blitz-host inspect --json /tmp/blitz-host/15365-1790037052950147000.json
 "#
     );
@@ -66,13 +101,15 @@ fn print_click_help() {
         r#"blitz-host-click: Dispatch synthetic click to a live Blitz window element.
 
 USAGE:
-    blitz-host click [OPTIONS] <NODE_ID> [DESCRIPTOR_PATH]
+    blitz-host click <NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
     <NODE_ID>                Target node integer ID to click (e.g. 4294967402)
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
 
 NOTE:
@@ -81,8 +118,52 @@ NOTE:
 
 EXAMPLES:
     blitz-host click 4294967402
+    blitz-host click 4294967402 --pid 37462
 "#
     );
+}
+
+fn parse_pid_arg(args: &[String]) -> Option<u32> {
+    for i in 0..args.len() {
+        if args[i] == "--pid" && i + 1 < args.len() {
+            return args[i + 1].parse().ok();
+        }
+        if let Some(rest) = args[i].strip_prefix("--pid=") {
+            return rest.parse().ok();
+        }
+    }
+    None
+}
+
+fn parse_window_arg(args: &[String]) -> Option<u64> {
+    for i in 0..args.len() {
+        if (args[i] == "--window" || args[i] == "--window-id") && i + 1 < args.len() {
+            return args[i + 1].parse().ok();
+        }
+        if let Some(rest) = args[i].strip_prefix("--window=") {
+            return rest.parse().ok();
+        }
+        if let Some(rest) = args[i].strip_prefix("--window-id=") {
+            return rest.parse().ok();
+        }
+    }
+    None
+}
+
+fn determine_selector(args: &[String]) -> TargetSelector {
+    if let Some(pid) = parse_pid_arg(args) {
+        return TargetSelector::Pid(pid);
+    }
+    let explicit_path = args
+        .iter()
+        .find(|a| !a.starts_with('-') && (a.ends_with(".json") || a.ends_with(".sock")))
+        .map(PathBuf::from);
+
+    if let Some(path) = explicit_path {
+        TargetSelector::ExplicitPath(path)
+    } else {
+        TargetSelector::Auto
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -102,6 +183,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subcmd = args[1].as_str();
 
     match subcmd {
+        "list" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_list_help();
+                return Ok(());
+            }
+
+            let is_json = subargs.iter().any(|a| a == "--json");
+            let hosts = blitz_host::transport::list_hosts()?;
+
+            if is_json {
+                println!("{}", serde_json::to_string_pretty(&hosts)?);
+                return Ok(());
+            }
+
+            if hosts.is_empty() {
+                println!("No active, reachable Blitz hosts found in $TMPDIR/blitz-host.");
+                return Ok(());
+            }
+
+            println!("===================================================================================================");
+            println!("[blitz-host] Active Blitz Host Processes ({})", hosts.len());
+            println!("===================================================================================================");
+            println!("{:<8} {:<20} {:<10} {:<12} {:<10} {:<30}", "PID", "RENDERER", "DOC ID", "WINDOW ID", "STATUS", "SOCKET");
+            println!("{:-<8} {:-<20} {:-<10} {:-<12} {:-<10} {:-<30}", "", "", "", "", "", "");
+
+            for h in &hosts {
+                let renderer_str = format!("{} v{}", h.renderer, h.renderer_version);
+                let doc_id_str = h
+                    .primary_document_id
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let win_id_str = h
+                    .primary_window_id
+                    .map(|w| w.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let short_socket = if h.socket_path.len() > 30 {
+                    format!("...{}", &h.socket_path[h.socket_path.len() - 27..])
+                } else {
+                    h.socket_path.clone()
+                };
+
+                println!(
+                    "{:<8} {:<20} {:<10} {:<12} {:<10} {:<30}",
+                    h.pid, renderer_str, doc_id_str, win_id_str, "reachable", short_socket
+                );
+            }
+            println!("===================================================================================================");
+            println!("Tip: Target a specific host with: blitz-host inspect --pid <PID>");
+            Ok(())
+        }
         "inspect" => {
             let subargs = &args[2..];
             if subargs.iter().any(|a| a == "-h" || a == "--help") {
@@ -110,22 +242,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let is_json = subargs.iter().any(|a| a == "--json");
-            let descriptor_path = subargs
-                .iter()
-                .find(|a| !a.starts_with('-') && a.ends_with(".json"))
-                .map(PathBuf::from);
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
 
-            let mut client = match DebugClient::connect_discovered(descriptor_path.as_deref()) {
+            let mut client = match DebugClient::connect_target(&selector) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error connecting to Blitz host: {e}");
                     eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
                     std::process::exit(1);
                 }
             };
 
             let desc = client.descriptor().clone();
-            let response = client.inspect(InspectRequest::default())?;
+            let mut req = InspectRequest::default();
+            req.window_id = window_id;
+            let response = client.inspect(req)?;
 
             if is_json {
                 println!("{}", serde_json::to_string_pretty(&response)?);
@@ -138,7 +271,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Connected to host:");
             println!("  • Renderer        : {} v{}", desc.renderer, desc.renderer_version);
             println!("  • PID             : {}", desc.pid);
-            println!("  • Instance ID     : {}", desc.instance_id);
+            if let Some(win_id) = desc.primary_window_id {
+                println!("  • Primary Window  : {}", win_id);
+            }
+            if let Some(doc_id) = desc.primary_document_id {
+                println!("  • Primary Document: {}", doc_id);
+            }
             println!("  • Socket Path     : {}", desc.socket_path);
             println!("  • Protocol Version: {}", desc.protocol_version);
             println!("-----------------------------------------------------------------");
@@ -195,7 +333,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let node_id_str = subargs.iter().find(|a| !a.starts_with('-') && !a.ends_with(".json"));
+            let node_id_str = subargs.iter().find(|a| {
+                !a.starts_with('-')
+                    && !a.ends_with(".json")
+                    && !a.ends_with(".sock")
+                    && a.parse::<u64>().is_ok()
+            });
             let node_id: u64 = match node_id_str.and_then(|s| s.parse().ok()) {
                 Some(id) => id,
                 None => {
@@ -205,22 +348,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let descriptor_path = subargs
-                .iter()
-                .find(|a| !a.starts_with('-') && a.ends_with(".json"))
-                .map(PathBuf::from);
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
 
-            let mut client = match DebugClient::connect_discovered(descriptor_path.as_deref()) {
+            let mut client = match DebugClient::connect_target(&selector) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("Error connecting to Blitz host: {e}");
                     eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
                     std::process::exit(1);
                 }
             };
 
-            println!("Dispatching click action to node #{} on live window...", node_id);
-            let act_res = client.click(node_id)?;
+            println!(
+                "Dispatching click action to node #{} (PID: {})...",
+                node_id,
+                client.descriptor().pid
+            );
+            let act_res = client.click_window(window_id, node_id)?;
             println!(
                 "  • Act response: success={}, message={:?}",
                 act_res.success, act_res.message
@@ -228,7 +374,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Auto-settle 2 frames to ensure DOM and layout mutation settled
             println!("Synchronizing 2 VSync frames on live window...");
-            let settle_res = client.settle(2)?;
+            let settle_res = client.settle_window(window_id, 2)?;
             println!(
                 "  • Settle response: settled={}, current_frame={}",
                 settle_res.settled, settle_res.current_frame

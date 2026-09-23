@@ -8,7 +8,10 @@ pub mod server;
 pub mod waker;
 
 pub use client::DebugClient;
-pub use discovery::{descriptor_dir, discover, is_reachable, read_descriptor, write_descriptor};
+pub use discovery::{
+    descriptor_dir, discover, discover_target, is_reachable, list_hosts, read_descriptor,
+    write_descriptor, TargetSelector,
+};
 pub use server::{ControlBridgeRequest, DebugServer};
 pub use waker::ServiceWaker;
 
@@ -52,6 +55,7 @@ mod tests {
         let mut client = DebugClient::connect(descriptor).expect("client must connect");
         let resp = client
             .inspect(InspectRequest {
+                window_id: None,
                 root_node_id: Some(42),
                 max_depth: None,
             })

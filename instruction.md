@@ -1,4 +1,4 @@
-# Worker Instruction: Remove `--debug-control` and Make `blitz-host` Always Available in the Feature-Enabled Dev Lane
+# Worker Instruction: Implement the Agreed Targeting Model (`list` + `--pid`, with Future Window Readiness)
 
 You are working in:
 
@@ -6,16 +6,15 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The previous work established:
+The inspection/design discussion already settled the direction.
 
-1. `blitz-host` as a separate crate family
-2. `oxidase` as the ergonomic integration boundary
-3. a canonical cross-host example
-4. a native-specific proof harness
+Do **not** narrow it down incorrectly.
 
-The next direction is now fixed:
+The agreed model is:
 
-> **in the development lane, if `blitz-host` is compiled in, access through `blitz-host` should just be available — no `--debug-control` runtime flag required**
+1. solve the real **process-level ambiguity** now
+2. keep the protocol/design **window-ready** for future same-process multi-window support
+3. **do not expose `--instance` as a visible CLI option**
 
 Write all agent-facing reasoning in English.
 
@@ -32,158 +31,204 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Remove the runtime `--debug-control` / `BLITZ_DEBUG_CONTROL` gating model from the current development/integration lane.
+Implement the next `blitz-host` targeting slice so that:
 
-The intended model is now:
+1. users/agents can list running attachable hosts
+2. users/agents can explicitly target the correct host process by PID
+3. the protocol/descriptors are made ready for future window-level routing
+4. today’s single-window default remains ergonomic
 
-1. **compile-time opt-in** via the `blitz-host` feature
-2. **always available at runtime** inside that feature-enabled development lane
-
-In other words:
-
-> if an app/example/harness is built with `oxidase` + `features = ["blitz-host"]`, then `blitz-host` access should be active by default in that dev lane without a separate runtime enable flag.
+This is the actual target.
 
 ---
 
-## 2. Required Direction
+## 2. The Agreed Design You Must Follow
 
-### A. Remove runtime flag dependence from the current dev story
+### A. Process-level selection first
 
-The current `--debug-control` / `BLITZ_DEBUG_CONTROL` gating should be removed from the active development workflow.
+Implement the real immediate solution:
 
-That means cleaning up code and docs that currently imply:
+1. `blitz-host list`
+2. `--pid <PID>`
 
-1. feature compiled in
-2. but still a second runtime switch is needed just to make local attach possible
+This solves the current multi-process ambiguity.
 
-That is no longer the desired UX.
+### B. Window-level readiness too
 
-### B. Keep compile-time opt-in
+Do **not** stop at process selection alone.
 
-This does **not** mean always-on for all builds everywhere.
+Because the runtime inspection already showed that real window/document identity exists:
 
-The boundary remains:
+1. `WindowId`
+2. `BaseDocument::id()`
 
-1. build with `blitz-host` feature → debug/control access is available
-2. build without `blitz-host` feature → no debug/control integration
+the protocol/design should become ready for future window-level routing now, **with fallback semantics**, even if true same-process multi-window is not live yet.
 
-So the feature is still the opt-in.
+That means it is acceptable and expected to:
 
-What is being removed is the **extra runtime toggle** in the normal development lane.
+1. extend descriptor metadata with primary window/document identity
+2. add optional routing fields (for example `window_id: Option<...>`) to requests where appropriate
+3. preserve default fallback behavior when that field is absent
 
----
+### C. `--instance` must not be a visible CLI option
 
-## 3. What This Means in Practice
+This is the simplification decision:
 
-For the current `oxidase` ecosystem story, the desired development model becomes:
+> the user-facing CLI should expose `--pid`, not `--instance`
 
-```toml
-oxidase = { git = "...", tag = "...", features = ["native", "blitz-host"] }
-```
+That does **not** mean instance IDs or descriptor paths cannot still exist internally or as lower-level machinery.
 
-and then:
-
-```rust
-#[oxidase::main]
-fn main() {
-    dioxus::launch(App);
-}
-```
-
-with no further `--debug-control` requirement in ordinary development usage.
-
-If the feature is present, the control plane should be available.
+It means the human/agent-facing CLI surface should not grow a visible `--instance` option in this slice.
 
 ---
 
-## 4. Required Cleanup Targets
+## 3. Scope for This Pass
 
-You must remove or rewrite the runtime-flag model across the current lane where appropriate.
+### Must implement
 
-At minimum, inspect and update:
+1. `blitz-host list`
+2. PID-based selection in the CLI
+3. real transport/client selector support for PID targeting
+4. descriptor/protocol updates needed to prepare future window-level routing
+5. fallback behavior for today’s single-window hosts
 
-1. `oxidase` integration code
-2. `blitz-host` host helpers
-3. canonical `cross_host` example
-4. `oxidase-native-runner`
-5. `blitz-host` CLI/help/docs/examples/results that instruct users to pass `--debug-control`
+### Must not over-expand
 
-### Important note
+1. no full same-process multi-window host registry yet unless it is tiny and unavoidable
+2. no broad redesign of the whole protocol beyond what this targeting slice needs
+3. no visible `--instance` CLI option
 
-If you keep any runtime switch at all, it must be for a different reason than merely “make blitz-host available in development.”
-
-For the current intended dev lane, feature presence should be enough.
-
----
-
-## 5. Canonical Story After This Change
-
-You must make the story explicit and consistent:
-
-### Canonical cross-host example
-
-If built with `blitz-host` feature:
-
-1. Web/native example runs normally
-2. Native debug attach is already available
-3. no extra `--debug-control` argument is needed
-
-### Native proof harness
-
-If built with `blitz-host` feature:
-
-1. the harness should already be attachable
-2. tests should not require an extra runtime enable flag merely to expose the control plane
+Keep it to the agreed model.
 
 ---
 
-## 6. What Not to Break
+## 4. Current Facts You Should Start From
 
-Do not break:
+Unless reinspection disproves them:
 
-1. the `blitz-host` / `oxidase` boundary
-2. the canonical cross-host example
-3. the native proof harness
-4. attach / inspect / click / settle / changed-state proof
+1. the current practical runtime is one process → one primary window/document
+2. the real immediate collision surface is multiple host processes
+3. Blitz/Winit still already allocate real window/document identities
+4. the right next step is therefore:
+   - process-level UX now
+   - window-level protocol readiness now
+   - full same-process multi-window execution later
 
-The goal is to simplify enablement, not reduce functionality.
+This pass should implement exactly that.
 
 ---
 
-## 7. Files / Areas to Reinspect
+## 5. Required UX
+
+### `blitz-host list`
+
+Add a command that lists live reachable hosts in a useful way.
+
+At minimum, include enough fields to make targeting decisions practical.
+
+Reasonable fields include:
+
+1. PID
+2. renderer/app name
+3. renderer/app version
+4. primary document ID
+5. primary window identity if exposed
+6. socket path / status as useful
+
+### `--pid <PID>`
+
+Expose `--pid` on the relevant commands such as:
+
+1. `inspect`
+2. `click`
+3. other current host-connecting commands if appropriate
+
+Behavior:
+
+1. if `--pid` is present, connect to that process deterministically
+2. if omitted, keep today’s default discovery behavior
+
+### No visible `--instance`
+
+Do not add `--instance` to the visible CLI surface in this pass.
+
+---
+
+## 6. Transport / Client Requirements
+
+PID targeting must be real all the way down, not a CLI-only trick.
+
+That means you should add or update an actual selector model in code, for example:
+
+1. `TargetSelector::Pid(u32)`
+2. `DebugClient::connect_to(selector)`
+3. or an equivalent clean abstraction
+
+If instance IDs remain useful internally, they may stay internal. They do not need to be a user-facing flag.
+
+---
+
+## 7. Protocol / Descriptor Readiness
+
+This pass should also prepare the protocol/design for future window-level routing.
+
+That may include:
+
+1. surfacing primary window/document identity in descriptors
+2. introducing optional request routing fields with primary fallback semantics
+
+Important:
+
+> today’s common path must remain ergonomic, meaning omission should naturally target the current primary/default window.
+
+Do not force users to specify a window identifier in the single-window case.
+
+---
+
+## 8. What Not to Do
+
+1. do not expose `--instance`
+2. do not fully implement same-process multi-window host registries yet
+3. do not pretend process-level selection alone finishes the architectural question
+4. do not overcomplicate the visible UX for today’s single-window case
+
+This pass should implement the agreed middle path.
+
+---
+
+## 9. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/launch.rs`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/src/prelude.rs`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-macro/src/main_macro.rs`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/main.rs`
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/src/main.rs`
-8. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/`
-9. tests that currently spawn or launch with `--debug-control`
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/client.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/discovery.rs`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+7. any descriptor and request types affected by targeting changes
 
 ---
 
-## 8. Validation You Must Run
+## 10. Validation You Must Run
 
-Run the smallest commands that prove the new always-available dev-lane story is real.
+Run the smallest commands that prove the targeting model actually works.
 
 At minimum:
 
-1. validate the canonical `cross_host` example in the feature-enabled native lane **without** `--debug-control`
-2. validate the native proof harness attach path **without** `--debug-control`
-3. run the `blitz-host` test suite after the change
-4. confirm attach / inspect / click / settle / changed-state proof still works
+1. validate `blitz-host list`
+2. validate `blitz-host inspect --pid <PID>`
+3. validate `blitz-host click <NODE_ID> --pid <PID>` if click remains supported
+4. validate the client/transport selector implementation behind PID targeting
+5. rerun the current proof path to ensure attach / inspect / click still work
 
-If Web/native example validation is part of the current slice, keep both honest.
+Do not call this complete based only on compile success.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 9. `result.md` Requirement
+## 11. `result.md` Requirement
 
 Update:
 
@@ -191,22 +236,24 @@ Update:
 
 It must explicitly record:
 
-1. what runtime gating was removed
-2. what compile-time gating remains
-3. how the example and harness are now activated in the feature-enabled lane
-4. what commands were used to prove attachability without `--debug-control`
-5. what still remains unresolved
+1. how `list` works
+2. how `--pid` targeting works
+3. what transport/client selector was added
+4. what descriptor/protocol readiness was added for future window-level routing
+5. how fallback-to-primary behavior works today
+6. what remains deferred
 
 ---
 
-## 10. Final Verdict Rule
+## 12. Final Verdict Rule
 
-You may report **Implemented and simplified** only if:
+You may report **Implemented and clarified** only if:
 
-1. the current dev lane no longer needs `--debug-control` merely to make `blitz-host` available
-2. feature-enabled builds are attachable by default in the intended lane
-3. the example and runner stories remain honest and working
-4. the proof path still works end to end
+1. `blitz-host list` works
+2. PID-based targeting is real and deterministic
+3. the CLI and client/transport layer agree on the selector model
+4. the protocol/design is more future-ready for window routing without breaking today’s ergonomic default path
+5. the existing attach / inspect / click flow still works
 
 Otherwise report:
 
@@ -216,4 +263,4 @@ or
 
 The purpose of this pass is:
 
-> make `blitz-host` availability automatic in the feature-enabled development lane, instead of requiring an extra runtime opt-in flag.
+> implement the agreed targeting model: process-level selection now, future window-level readiness built in, and no visible `--instance` option.

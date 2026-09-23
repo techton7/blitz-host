@@ -24,16 +24,14 @@ fn test_live_native_runner_attach_and_inspect() {
     let pid = child.id();
     println!("Spawned child process with PID: {}", pid);
 
-    // Poll for discovery and attach (wait up to 10 seconds for window mount & descriptor write)
+    // Poll for discovery and attach via PID targeting (wait up to 10 seconds for window mount & descriptor write)
     let mut client = None;
     for attempt in 1..=25 {
         thread::sleep(Duration::from_millis(400));
-        if let Ok(c) = DebugClient::connect_discovered(None) {
-            if c.descriptor().pid == pid {
-                println!("Successfully connected to live host on attempt #{}", attempt);
-                client = Some(c);
-                break;
-            }
+        if let Ok(c) = DebugClient::connect_pid(pid) {
+            println!("Successfully connected to live host via PID {} on attempt #{}", pid, attempt);
+            client = Some(c);
+            break;
         }
     }
 
@@ -45,6 +43,13 @@ fn test_live_native_runner_attach_and_inspect() {
             panic!("Failed to discover and connect to running oxidase-native-runner host within 10s");
         }
     };
+
+    // Verify list_hosts discovers this live PID
+    let hosts = blitz_host_transport::list_hosts().expect("list_hosts must succeed");
+    assert!(
+        hosts.iter().any(|h| h.pid == pid),
+        "list_hosts must contain child process PID {pid}"
+    );
 
     let desc = client.descriptor().clone();
     println!("Host Descriptor:");

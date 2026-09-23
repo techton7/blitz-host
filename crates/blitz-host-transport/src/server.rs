@@ -63,6 +63,8 @@ impl DebugServer {
             socket_path: socket_path.to_string_lossy().to_string(),
             renderer: renderer.into(),
             renderer_version: renderer_version.into(),
+            primary_window_id: None,
+            primary_document_id: None,
         };
 
         let descriptor_path = write_descriptor(&descriptor)?;
@@ -102,6 +104,18 @@ impl DebugServer {
     /// Access the published host descriptor.
     pub fn descriptor(&self) -> &HostDescriptor {
         &self.descriptor
+    }
+
+    /// Update primary window and document metadata in the descriptor and on disk.
+    pub fn update_primary_window(
+        &mut self,
+        window_id: Option<u64>,
+        document_id: Option<usize>,
+    ) -> std::io::Result<()> {
+        self.descriptor.primary_window_id = window_id;
+        self.descriptor.primary_document_id = document_id;
+        write_descriptor(&self.descriptor)?;
+        Ok(())
     }
 
     /// Socket path on disk.

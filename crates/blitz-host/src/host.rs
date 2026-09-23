@@ -107,6 +107,20 @@ impl HostControl {
             .unwrap_or(false)
     }
 
+    /// Update primary window and document metadata in descriptor.
+    pub fn set_primary_window(&mut self, window_id: Option<u64>, document_id: Option<usize>) {
+        let _ = self.server.update_primary_window(window_id, document_id);
+    }
+
+    /// Update primary window and document metadata in the process-global singleton if active.
+    pub fn set_global_primary_window(window_id: Option<u64>, document_id: Option<usize>) {
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
+            if let Some(ctrl) = guard.as_mut() {
+                ctrl.set_primary_window(window_id, document_id);
+            }
+        }
+    }
+
     /// Polls and services pending control requests against the live BaseDocument.
     pub fn poll_and_service<F>(
         &mut self,
@@ -117,6 +131,10 @@ impl HostControl {
     where
         F: FnMut(&ActionRequest, &BaseDocument) -> Result<ActionResponse, String>,
     {
+        if self.server.descriptor().primary_document_id.is_none() {
+            let win_id = self.server.descriptor().primary_window_id;
+            let _ = self.server.update_primary_window(win_id, Some(doc.id()));
+        }
         self.bridge.poll_and_service_with(doc, current_frame, dispatch_action)
     }
 
@@ -151,7 +169,7 @@ impl HostControl {
         F: FnMut(&BaseDocument, u64) -> bool,
     {
         match action_req {
-            ActionRequest::Click { node_id } => {
+            ActionRequest::Click { node_id, .. } => {
                 if click_fn(base_doc, *node_id) {
                     Ok(ActionResponse {
                         success: true,

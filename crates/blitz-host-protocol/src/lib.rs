@@ -26,12 +26,21 @@ pub struct HostDescriptor {
     pub renderer: String,
     /// Host renderer version or build revision.
     pub renderer_version: String,
+    /// Primary window handle if exposed by the host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_window_id: Option<u64>,
+    /// Primary document identifier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_document_id: Option<usize>,
 }
 
 /// Request to inspect the running host's DOM / semantic tree.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InspectRequest {
+    /// Optional target window handle (falls back to primary window if None).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<u64>,
     /// Optional starting root node id. If `None`, inspection starts at document root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_node_id: Option<u64>,
@@ -90,7 +99,12 @@ pub struct InspectResponse {
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum ActionRequest {
     /// Synthetic click on a node.
-    Click { node_id: u64 },
+    Click {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        node_id: u64,
+    },
 }
 
 /// Result of executing an action.
@@ -110,6 +124,9 @@ pub struct ActionResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettleRequest {
+    /// Optional target window handle (falls back to primary window if None).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<u64>,
     /// Number of render/animation frames to wait.
     pub frames: u32,
 }
@@ -166,6 +183,8 @@ mod tests {
             socket_path: "/tmp/blitz-host/test.sock".into(),
             renderer: "blitz".into(),
             renderer_version: "0.1.0".into(),
+            primary_window_id: Some(100),
+            primary_document_id: Some(1),
         };
 
         let json = serde_json::to_string_pretty(&desc).unwrap();
@@ -176,6 +195,7 @@ mod tests {
     #[test]
     fn test_control_envelope_serde_roundtrip() {
         let req = ControlRequest::Inspect(InspectRequest {
+            window_id: None,
             root_node_id: Some(10),
             max_depth: Some(5),
         });
@@ -208,7 +228,10 @@ mod tests {
         assert_eq!(resp, parsed);
 
         // Test Action roundtrip
-        let act_req = ControlRequest::Act(ActionRequest::Click { node_id: 42 });
+        let act_req = ControlRequest::Act(ActionRequest::Click {
+            window_id: None,
+            node_id: 42,
+        });
         let act_json = serde_json::to_string(&act_req).unwrap();
         let act_parsed: ControlRequest = serde_json::from_str(&act_json).unwrap();
         assert_eq!(act_req, act_parsed);
@@ -223,7 +246,10 @@ mod tests {
         assert_eq!(act_resp, act_resp_parsed);
 
         // Test Settle roundtrip
-        let settle_req = ControlRequest::Settle(SettleRequest { frames: 2 });
+        let settle_req = ControlRequest::Settle(SettleRequest {
+            window_id: None,
+            frames: 2,
+        });
         let settle_json = serde_json::to_string(&settle_req).unwrap();
         let settle_parsed: ControlRequest = serde_json::from_str(&settle_json).unwrap();
         assert_eq!(settle_req, settle_parsed);

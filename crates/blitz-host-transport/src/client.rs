@@ -8,8 +8,6 @@ use blitz_host_protocol::{
     InspectRequest, InspectResponse, SettleRequest, SettleResponse,
 };
 
-use crate::discovery::discover;
-
 /// Client used by agents or test runners to interact with a live running Blitz host.
 pub struct DebugClient {
     stream: UnixStream,
@@ -32,10 +30,24 @@ impl DebugClient {
         })
     }
 
+    /// Connect to a live Blitz host matching the given TargetSelector.
+    pub fn connect_target(selector: &crate::discovery::TargetSelector) -> io::Result<Self> {
+        let descriptor = crate::discovery::discover_target(selector)?;
+        Self::connect(descriptor)
+    }
+
+    /// Convenience helper to connect to a host running with a specific OS process ID.
+    pub fn connect_pid(pid: u32) -> io::Result<Self> {
+        Self::connect_target(&crate::discovery::TargetSelector::Pid(pid))
+    }
+
     /// Automatically discover a live host on the local machine and connect to it.
     pub fn connect_discovered(explicit_path: Option<&Path>) -> io::Result<Self> {
-        let descriptor = discover(explicit_path)?;
-        Self::connect(descriptor)
+        let selector = match explicit_path {
+            Some(p) => crate::discovery::TargetSelector::ExplicitPath(p.to_path_buf()),
+            None => crate::discovery::TargetSelector::Auto,
+        };
+        Self::connect_target(&selector)
     }
 
     /// Access the host descriptor.
@@ -86,14 +98,24 @@ impl DebugClient {
         }
     }
 
-    /// Convenience helper to click on a specific node by ID.
+    /// Convenience helper to click on a specific node by ID on the default/fallback window.
     pub fn click(&mut self, node_id: u64) -> io::Result<ActionResponse> {
-        self.act(ActionRequest::Click { node_id })
+        self.click_window(None, node_id)
     }
 
-    /// Synchronize execution by waiting for `frames` VSync / render ticks on the host.
+    /// Click on a specific node by ID on a targeted window (or primary fallback if None).
+    pub fn click_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
+        self.act(ActionRequest::Click { window_id, node_id })
+    }
+
+    /// Synchronize execution by waiting for `frames` VSync / render ticks on the default window.
     pub fn settle(&mut self, frames: u32) -> io::Result<SettleResponse> {
-        match self.send_request(ControlRequest::Settle(SettleRequest { frames }))? {
+        self.settle_window(None, frames)
+    }
+
+    /// Synchronize execution by waiting for `frames` VSync / render ticks on a targeted window.
+    pub fn settle_window(&mut self, window_id: Option<u64>, frames: u32) -> io::Result<SettleResponse> {
+        match self.send_request(ControlRequest::Settle(SettleRequest { window_id, frames }))? {
             ControlResponse::SettleSuccess(settle_resp) => Ok(settle_resp),
             ControlResponse::Error(err) => Err(io::Error::other(err)),
             other => Err(io::Error::other(format!(

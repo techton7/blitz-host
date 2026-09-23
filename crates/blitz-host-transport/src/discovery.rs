@@ -44,32 +44,29 @@ pub fn write_descriptor(descriptor: &HostDescriptor) -> io::Result<PathBuf> {
     write_result.map(|()| target_path)
 }
 
-/// Discover a live, reachable Blitz host on the local machine.
-pub fn discover(explicit: Option<&Path>) -> io::Result<HostDescriptor> {
-    if let Some(path) = explicit {
-        if !path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Explicit descriptor '{}' does not exist", path.display()),
-            ));
-        }
-        let desc = read_descriptor(path)?;
-        if is_reachable(&desc) {
-            return Ok(desc);
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!("Control socket at '{}' is unreachable", desc.socket_path),
-            ));
-        }
-    }
+/// Selection criteria for targeting an active Blitz host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetSelector {
+    /// Auto-discover the latest reachable host.
+    Auto,
+    /// Connect to a host running with a specific OS process ID.
+    Pid(u32),
+    /// Connect to a host at an explicit descriptor or socket path.
+    ExplicitPath(PathBuf),
+}
 
+impl Default for TargetSelector {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// Enumerate all currently advertised Blitz host descriptors, sorted newest first.
+/// Dead hosts with unalive PIDs are pruned automatically.
+pub fn list_hosts() -> io::Result<Vec<HostDescriptor>> {
     let dir = descriptor_dir();
     if !dir.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "No active blitz-host descriptors found in $TMPDIR/blitz-host",
-        ));
+        return Ok(Vec::new());
     }
 
     let entries = fs::read_dir(&dir)?;
@@ -90,22 +87,82 @@ pub fn discover(explicit: Option<&Path>) -> io::Result<HostDescriptor> {
     // Sort newest first
     descriptors.sort_by(|a, b| b.0.cmp(&a.0));
 
+    let mut reachable_hosts = Vec::new();
     for (_modified, path, desc) in descriptors {
         if is_reachable(&desc) {
-            return Ok(desc);
-        } else {
-            // Check if PID is alive. If dead, reap the stale descriptor and orphaned socket
-            if !is_pid_alive(desc.pid) {
-                let _ = fs::remove_file(&path);
-                let _ = fs::remove_file(Path::new(&desc.socket_path));
-            }
+            reachable_hosts.push(desc);
+        } else if !is_pid_alive(desc.pid) {
+            // Reap stale descriptor and socket for dead PID
+            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(Path::new(&desc.socket_path));
         }
     }
 
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "No live, reachable blitz-host instance found",
-    ))
+    Ok(reachable_hosts)
+}
+
+/// Discover a live, reachable Blitz host according to the provided selector.
+pub fn discover_target(selector: &TargetSelector) -> io::Result<HostDescriptor> {
+    match selector {
+        TargetSelector::ExplicitPath(path) => {
+            if !path.exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Explicit descriptor or socket '{}' does not exist", path.display()),
+                ));
+            }
+            if path.extension().is_some_and(|ext| ext == "sock") {
+                return Ok(HostDescriptor {
+                    protocol_version: blitz_host_protocol::PROTOCOL_VERSION,
+                    pid: 0,
+                    instance_id: "explicit-socket".to_string(),
+                    socket_path: path.to_string_lossy().to_string(),
+                    renderer: "blitz".to_string(),
+                    renderer_version: "unknown".to_string(),
+                    primary_window_id: None,
+                    primary_document_id: None,
+                });
+            }
+            let desc = read_descriptor(path)?;
+            if is_reachable(&desc) {
+                Ok(desc)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    format!("Control socket at '{}' is unreachable", desc.socket_path),
+                ))
+            }
+        }
+        TargetSelector::Pid(target_pid) => {
+            let hosts = list_hosts()?;
+            hosts
+                .into_iter()
+                .find(|d| d.pid == *target_pid)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("No live, reachable Blitz host found with PID {target_pid}"),
+                    )
+                })
+        }
+        TargetSelector::Auto => {
+            let hosts = list_hosts()?;
+            hosts.into_iter().next().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "No active blitz-host instances found in $TMPDIR/blitz-host",
+                )
+            })
+        }
+    }
+}
+
+/// Discover a live, reachable Blitz host on the local machine (backward-compatible).
+pub fn discover(explicit: Option<&Path>) -> io::Result<HostDescriptor> {
+    match explicit {
+        Some(path) => discover_target(&TargetSelector::ExplicitPath(path.to_path_buf())),
+        None => discover_target(&TargetSelector::Auto),
+    }
 }
 
 /// Read and parse a HostDescriptor from a JSON file.

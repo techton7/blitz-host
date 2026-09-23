@@ -56,7 +56,7 @@ The first real host target is:
 
 - `util/oxidase/crates/oxidase-native-runner`
 
-behind an explicit debug flag such as `--debug-control`.
+in the `blitz-host` feature-enabled development lane.
 
 ## Reference-informed architectural shape
 
@@ -156,6 +156,26 @@ The first version should be intentionally narrow.
 5. large diagnostics surface
 6. public API stabilization
 
+## Current established state
+
+The roadmap is no longer at the original inspect-only hypothesis stage.
+
+The currently established state is:
+
+1. `blitz-host` attach / inspect is runtime-proven
+2. `blitz-host` click / settle / changed-state verification is runtime-proven
+3. the ergonomic integration boundary now lives at `oxidase`
+4. in the feature-enabled development lane, `blitz-host` availability is on by default without requiring a positive `--debug-control` flag
+5. `oxidase` now has a canonical cross-host example
+6. `oxidase-native-runner` remains the native-specific proof harness
+
+This means the roadmap should now treat the following as the active split:
+
+- **canonical cross-host consumer story** → `crates/oxidase/examples/cross_host/`
+- **native-specific proof harness** → `crates/oxidase-native-runner/`
+
+The runner should not be treated as the only proof of value anymore.
+
 ## Non-goals
 
 These are explicitly out of scope for the first pass:
@@ -228,15 +248,29 @@ Integrate into `oxidase-native-runner`.
 
 Focus:
 
-- explicit debug flag
-- no impact on ordinary runs when disabled
-- prove that an agent can discover and attach to the live runner
+- durable native proof harness behavior
+- no regression in attach / inspect / click / settle proof
+- keeping the harness distinct from the canonical public example story
 
 Exit condition:
 
 - live internal runner can be controlled/inspected locally
 
-### Phase 5 - optional expansion
+### Phase 5 - example boundary clarification
+
+Establish the public-facing cross-host consumer story.
+
+Focus:
+
+- one canonical `oxidase` example representing the same app code on Web and Native
+- clear separation between example and native proof harness
+- honest documentation of the runner as an internal harness
+
+Exit condition:
+
+- the canonical example and the harness have distinct, explicit roles
+
+### Phase 6 - optional expansion
 
 Only after V1 is real:
 
@@ -259,7 +293,7 @@ The recommended next slice is:
 4. implement the first `blitz-host-bridge` vertical slice for **read-only inspect**
 5. wire that inspect-only path into `oxidase-native-runner` behind `--debug-control`
 
-### Why this is the right next stop line
+### Why this was the right first stop line
 
 This proves the most important architectural question first:
 
@@ -284,7 +318,45 @@ Defer these to the next slice unless they turn out to be nearly free:
 
 In short:
 
-> first prove **attach + inspect** end to end, then add **act + settle**, then consider capture and broader diagnostics.
+> first prove **attach + inspect** end to end, then add **act + settle**, then clarify the `oxidase` boundary, then establish the canonical cross-host example, then move on to broader expansion.
+
+## Next expansion categories
+
+Now that the initial attach / inspect / act / settle / `oxidase`-boundary / example split work is established, the roadmap should treat the next steps as three explicit expansion categories:
+
+### Category 1 - multi-window targeting & discovery UX
+
+This is now the most immediate usability gap.
+
+Focus:
+
+1. identifying which live Blitz window is which
+2. better descriptor metadata (for example window/app identity)
+3. explicit selection UX (`list`, `--pid`, instance selection, descriptor targeting)
+4. making multiple simultaneously-running windows practical for agent control
+
+### Category 2 - richer control / input surface
+
+The current proven interaction is click-only.
+
+Next likely additions:
+
+1. focus
+2. set-value / text input
+3. keyboard actions
+4. hover / pointer / scroll as needed
+
+The goal is to move from “can click a button” toward “can drive real app workflows.”
+
+### Category 3 - capture & richer diagnostics
+
+After targeting and richer control improve, the next major value lane is observability beyond semantic DOM:
+
+1. visual capture / screenshot support
+2. richer diagnostics streams
+3. eventually stronger rendering/debug proof surfaces
+
+This is where `blitz-host` becomes more useful for debugging visual/native rendering issues that DOM inspection alone cannot prove.
 
 ## Security posture
 
