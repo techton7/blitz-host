@@ -60,6 +60,7 @@ pub fn BlitzHost(children: Element) -> Element {
 
     let frame_counter = use_hook(|| Cell::new(0u64));
     let window = dioxus_native::use_window();
+    let window_for_redraw = window.clone();
 
     // Listen to native window redraw requests to service control requests
     dioxus_native::use_window_event(move |event, _target| {
@@ -71,23 +72,40 @@ pub fn BlitzHost(children: Element) -> Element {
             frame_counter.set(frame);
 
             if let Some(handle) = handle_for_event.borrow().as_ref() {
-                let doc = handle.doc();
+                let mut doc = handle.doc_mut();
                 let serviced = HostControl::service_global_frame(
-                    &doc,
+                    &mut doc,
                     frame,
                     |action_req, base_doc| {
-                        HostControl::handle_action_click(action_req, base_doc, |d, nid| {
-                            dioxus_native::dispatch_synthetic_click(
-                                d,
-                                blitz_dom::NodeId::from_u64(nid),
-                                keyboard_types::Modifiers::empty(),
-                            )
-                        })
+                        HostControl::handle_action(
+                            action_req,
+                            base_doc,
+                            |d, nid| {
+                                dioxus_native::dispatch_synthetic_click(
+                                    d,
+                                    blitz_dom::NodeId::from_u64(nid),
+                                    keyboard_types::Modifiers::empty(),
+                                )
+                            },
+                            |d, nid| {
+                                dioxus_native::dispatch_synthetic_focus(
+                                    d,
+                                    blitz_dom::NodeId::from_u64(nid),
+                                )
+                            },
+                            |d, nid, val| {
+                                dioxus_native::dispatch_synthetic_input(
+                                    d,
+                                    blitz_dom::NodeId::from_u64(nid),
+                                    val,
+                                )
+                            },
+                        )
                     },
                 );
 
                 if serviced > 0 {
-                    window.request_redraw();
+                    window_for_redraw.request_redraw();
                 }
             }
         }
@@ -100,7 +118,10 @@ pub fn BlitzHost(children: Element) -> Element {
                 if let Some(handle) = evt.downcast::<dioxus_native::NodeHandle>() {
                     *handle_for_mount.borrow_mut() = Some(handle.clone());
                     let doc_id = handle.doc().id();
-                    let win_id = u64::from(window.id());
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    window.id().hash(&mut hasher);
+                    let win_id = hasher.finish();
                     HostControl::set_global_primary_window(Some(win_id), Some(doc_id));
                 }
             },

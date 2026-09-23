@@ -124,12 +124,12 @@ impl HostControl {
     /// Polls and services pending control requests against the live BaseDocument.
     pub fn poll_and_service<F>(
         &mut self,
-        doc: &BaseDocument,
+        doc: &mut BaseDocument,
         current_frame: u64,
         dispatch_action: F,
     ) -> usize
     where
-        F: FnMut(&ActionRequest, &BaseDocument) -> Result<ActionResponse, String>,
+        F: FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     {
         if self.server.descriptor().primary_document_id.is_none() {
             let win_id = self.server.descriptor().primary_window_id;
@@ -142,12 +142,12 @@ impl HostControl {
     ///
     /// Returns the number of requests serviced during this turn.
     pub fn service_global_frame<F>(
-        doc: &BaseDocument,
+        doc: &mut BaseDocument,
         current_frame: u64,
         dispatch_action: F,
     ) -> usize
     where
-        F: FnMut(&ActionRequest, &BaseDocument) -> Result<ActionResponse, String>,
+        F: FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     {
         if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
             if let Some(ctrl) = guard.as_mut() {
@@ -155,6 +155,56 @@ impl HostControl {
             }
         }
         0
+    }
+
+    /// Dispatches UI actions (Click, Focus, SetValue) using provided closures.
+    pub fn handle_action<C, F, S>(
+        action_req: &ActionRequest,
+        base_doc: &mut BaseDocument,
+        mut click_fn: C,
+        mut focus_fn: F,
+        mut set_value_fn: S,
+    ) -> Result<ActionResponse, String>
+    where
+        C: FnMut(&mut BaseDocument, u64) -> bool,
+        F: FnMut(&mut BaseDocument, u64) -> bool,
+        S: FnMut(&mut BaseDocument, u64, &str) -> bool,
+    {
+        match action_req {
+            ActionRequest::Click { node_id, .. } => {
+                if click_fn(base_doc, *node_id) {
+                    Ok(ActionResponse {
+                        success: true,
+                        node_id: *node_id,
+                        message: Some(format!("Dispatched synthetic click to node #{node_id}")),
+                    })
+                } else {
+                    Err(format!("Node #{node_id} or active listener not found in document"))
+                }
+            }
+            ActionRequest::Focus { node_id, .. } => {
+                if focus_fn(base_doc, *node_id) {
+                    Ok(ActionResponse {
+                        success: true,
+                        node_id: *node_id,
+                        message: Some(format!("Dispatched synthetic focus to node #{node_id}")),
+                    })
+                } else {
+                    Err(format!("Node #{node_id} not found or not focusable"))
+                }
+            }
+            ActionRequest::SetValue { node_id, value, .. } => {
+                if set_value_fn(base_doc, *node_id, value) {
+                    Ok(ActionResponse {
+                        success: true,
+                        node_id: *node_id,
+                        message: Some(format!("Set value on node #{node_id}")),
+                    })
+                } else {
+                    Err(format!("Node #{node_id} not found or not an editable target"))
+                }
+            }
+        }
     }
 
     /// Convenience helper for standard click action handling.
@@ -180,6 +230,7 @@ impl HostControl {
                     Err(format!("Node #{node_id} or active listener not found in document"))
                 }
             }
+            other => Err(format!("Action {other:?} not supported by handle_action_click")),
         }
     }
 

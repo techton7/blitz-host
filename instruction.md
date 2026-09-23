@@ -1,4 +1,4 @@
-# Worker Instruction: Implement the Agreed Targeting Model (`list` + `--pid`, with Future Window Readiness)
+# Worker Instruction: Extend `blitz-host` with `Focus` + `SetValue` and Prove It Through a Three-Stage Test Route
 
 You are working in:
 
@@ -6,15 +6,17 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The inspection/design discussion already settled the direction.
+The current `blitz-host` stack has already proven:
 
-Do **not** narrow it down incorrectly.
+1. attach
+2. inspect
+3. click
+4. settle
+5. deterministic process targeting (`list` + `--pid`)
 
-The agreed model is:
+The next slice is now:
 
-1. solve the real **process-level ambiguity** now
-2. keep the protocol/design **window-ready** for future same-process multi-window support
-3. **do not expose `--instance` as a visible CLI option**
+> **move from “can click a button” to “can drive a real input workflow”**
 
 Write all agent-facing reasoning in English.
 
@@ -31,204 +33,193 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Implement the next `blitz-host` targeting slice so that:
+Add the next practical input/control surface to `blitz-host`:
 
-1. users/agents can list running attachable hosts
-2. users/agents can explicitly target the correct host process by PID
-3. the protocol/descriptors are made ready for future window-level routing
-4. today’s single-window default remains ergonomic
+1. `Focus`
+2. `SetValue`
 
-This is the actual target.
+and prove that they work through the full stack.
 
----
+The proof target is:
 
-## 2. The Agreed Design You Must Follow
-
-### A. Process-level selection first
-
-Implement the real immediate solution:
-
-1. `blitz-host list`
-2. `--pid <PID>`
-
-This solves the current multi-process ambiguity.
-
-### B. Window-level readiness too
-
-Do **not** stop at process selection alone.
-
-Because the runtime inspection already showed that real window/document identity exists:
-
-1. `WindowId`
-2. `BaseDocument::id()`
-
-the protocol/design should become ready for future window-level routing now, **with fallback semantics**, even if true same-process multi-window is not live yet.
-
-That means it is acceptable and expected to:
-
-1. extend descriptor metadata with primary window/document identity
-2. add optional routing fields (for example `window_id: Option<...>`) to requests where appropriate
-3. preserve default fallback behavior when that field is absent
-
-### C. `--instance` must not be a visible CLI option
-
-This is the simplification decision:
-
-> the user-facing CLI should expose `--pid`, not `--instance`
-
-That does **not** mean instance IDs or descriptor paths cannot still exist internally or as lower-level machinery.
-
-It means the human/agent-facing CLI surface should not grow a visible `--instance` option in this slice.
+> a live host can be attached, the right input can be focused, a value can be injected, the UI can settle, and the changed state can be observed through inspect.
 
 ---
 
-## 3. Scope for This Pass
+## 2. Scope Boundary
+
+This pass is intentionally **not** the full input matrix.
 
 ### Must implement
 
-1. `blitz-host list`
-2. PID-based selection in the CLI
-3. real transport/client selector support for PID targeting
-4. descriptor/protocol updates needed to prepare future window-level routing
-5. fallback behavior for today’s single-window hosts
+1. focus action
+2. set-value action
+3. whatever bridge/runtime support is needed for those actions
+4. a real inspect-visible proof target for the new workflow
 
-### Must not over-expand
+### Explicitly defer
 
-1. no full same-process multi-window host registry yet unless it is tiny and unavoidable
-2. no broad redesign of the whole protocol beyond what this targeting slice needs
-3. no visible `--instance` CLI option
+Do **not** expand further unless nearly free:
 
-Keep it to the agreed model.
+1. generalized keyboard sequence matrix
+2. drag / hover / pointer move
+3. scroll
+4. capture
+5. broad diagnostics
+
+Keep the slice narrow and finish the real workflow proof.
 
 ---
 
-## 4. Current Facts You Should Start From
+## 3. Current Facts You Should Start From
 
 Unless reinspection disproves them:
 
-1. the current practical runtime is one process → one primary window/document
-2. the real immediate collision surface is multiple host processes
-3. Blitz/Winit still already allocate real window/document identities
-4. the right next step is therefore:
-   - process-level UX now
-   - window-level protocol readiness now
-   - full same-process multi-window execution later
+1. process-level attach/selection is already working
+2. click + settle proof is already working
+3. `cross_host` is now the canonical cross-host example
+4. `oxidase-native-runner` remains the native-specific proof harness
+5. the next value jump is real text/input workflow control, not more selector bikeshedding
 
-This pass should implement exactly that.
+That is the next problem to solve.
 
 ---
 
-## 5. Required UX
+## 4. Required Action Surface
 
-### `blitz-host list`
+Extend the current action vocabulary with the minimum useful next actions.
 
-Add a command that lists live reachable hosts in a useful way.
+### A. `Focus`
 
-At minimum, include enough fields to make targeting decisions practical.
+This should allow the client to target a focusable node and make it the active element.
 
-Reasonable fields include:
+### B. `SetValue`
 
-1. PID
-2. renderer/app name
-3. renderer/app version
-4. primary document ID
-5. primary window identity if exposed
-6. socket path / status as useful
+This should allow the client to set text/input value on a target element through the real event/runtime path, not via fake test-only mutation shortcuts.
 
-### `--pid <PID>`
+### Important rule
 
-Expose `--pid` on the relevant commands such as:
+The implementation must preserve the philosophy already established:
 
-1. `inspect`
-2. `click`
-3. other current host-connecting commands if appropriate
-
-Behavior:
-
-1. if `--pid` is present, connect to that process deterministically
-2. if omitted, keep today’s default discovery behavior
-
-### No visible `--instance`
-
-Do not add `--instance` to the visible CLI surface in this pass.
+> use the real native / Dioxus event plumbing where possible, not a separate fake state channel.
 
 ---
 
-## 6. Transport / Client Requirements
+## 5. Required Proof Target
 
-PID targeting must be real all the way down, not a CLI-only trick.
+You need a real, inspect-visible workflow target.
 
-That means you should add or update an actual selector model in code, for example:
+Add or adapt the canonical app/harness UI so that the new workflow can be proven clearly.
 
-1. `TargetSelector::Pid(u32)`
-2. `DebugClient::connect_to(selector)`
-3. or an equivalent clean abstraction
+Reasonable shape:
 
-If instance IDs remain useful internally, they may stay internal. They do not need to be a user-facing flag.
+1. input field with stable ID (for example `id="test-input"`)
+2. inspect-visible derived state (for example `Typed: hello`)
+3. optional secondary control like a submit button if needed
 
----
+The proof must demonstrate:
 
-## 7. Protocol / Descriptor Readiness
+1. locate the input via inspect
+2. focus it
+3. set its value
+4. settle / wait as needed
+5. re-inspect and confirm the updated visible state
 
-This pass should also prepare the protocol/design for future window-level routing.
+Do not stop at “action call returned success.”
 
-That may include:
-
-1. surfacing primary window/document identity in descriptors
-2. introducing optional request routing fields with primary fallback semantics
-
-Important:
-
-> today’s common path must remain ergonomic, meaning omission should naturally target the current primary/default window.
-
-Do not force users to specify a window identifier in the single-window case.
+The proof is the changed state.
 
 ---
 
-## 8. What Not to Do
+## 6. Required Three-Stage Test Route
 
-1. do not expose `--instance`
-2. do not fully implement same-process multi-window host registries yet
-3. do not pretend process-level selection alone finishes the architectural question
-4. do not overcomplicate the visible UX for today’s single-window case
+This pass must follow the agreed testing route.
 
-This pass should implement the agreed middle path.
+### Stage 1 — protocol / transport unit route
+
+Validate:
+
+1. serde roundtrip for new action types
+2. transport/client response handling
+3. no regression in attach / selector model
+
+### Stage 2 — headless semantics route
+
+Use the cheapest honest route available (for example `blitz-test-harness` or an equivalent minimal document-level harness) to verify the event semantics themselves:
+
+1. focus is really applied
+2. set-value follows the real path you intend
+3. the expected DOM/semantic state changes happen after pump/tick/settle
+
+This stage exists to catch event/model issues before the expensive live native run.
+
+### Stage 3 — live native E2E route
+
+Final proof must happen against live running native targets.
+
+#### Preferred first proof target
+
+1. canonical `cross_host` example
+
+#### Secondary / harness proof target
+
+2. `oxidase-native-runner`
+
+The point is:
+
+> public consumer story first, harness story second.
 
 ---
 
-## 9. Files / Areas to Reinspect
+## 7. What Not to Do
+
+1. do not jump straight to keyboard matrix complexity
+2. do not skip the headless semantics route if it can cheaply falsify wrong event plumbing
+3. do not replace inspect-visible proof with “action returned success”
+4. do not turn this into a generic form automation platform in one pass
+
+This slice is:
+
+> focus + set-value + real proof
+
+no more.
+
+---
+
+## 8. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/client.rs`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/discovery.rs`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-7. any descriptor and request types affected by targeting changes
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/`
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
+8. any available headless harness/utilities that can cheaply validate focus/value semantics
 
 ---
 
-## 10. Validation You Must Run
+## 9. Validation You Must Run
 
-Run the smallest commands that prove the targeting model actually works.
+Run the smallest commands that honestly prove the slice.
 
 At minimum:
 
-1. validate `blitz-host list`
-2. validate `blitz-host inspect --pid <PID>`
-3. validate `blitz-host click <NODE_ID> --pid <PID>` if click remains supported
-4. validate the client/transport selector implementation behind PID targeting
-5. rerun the current proof path to ensure attach / inspect / click still work
+1. protocol / transport tests for the new action types
+2. a headless semantics proof route (if available and honest)
+3. live native E2E against `cross_host`
+4. continued or secondary proof against `oxidase-native-runner`
+5. confirmation that attach / inspect / click / settle still work after the change
 
-Do not call this complete based only on compile success.
+Do not call this complete if only the unit tests pass.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 11. `result.md` Requirement
+## 10. `result.md` Requirement
 
 Update:
 
@@ -236,24 +227,24 @@ Update:
 
 It must explicitly record:
 
-1. how `list` works
-2. how `--pid` targeting works
-3. what transport/client selector was added
-4. what descriptor/protocol readiness was added for future window-level routing
-5. how fallback-to-primary behavior works today
+1. what new actions were added
+2. how focus/value semantics are implemented
+3. what headless semantics route was used (or why it was unavailable)
+4. how the live E2E proof was run against `cross_host`
+5. what role `oxidase-native-runner` played in the proof
 6. what remains deferred
 
 ---
 
-## 12. Final Verdict Rule
+## 11. Final Verdict Rule
 
-You may report **Implemented and clarified** only if:
+You may report **Implemented and proven** only if:
 
-1. `blitz-host list` works
-2. PID-based targeting is real and deterministic
-3. the CLI and client/transport layer agree on the selector model
-4. the protocol/design is more future-ready for window routing without breaking today’s ergonomic default path
-5. the existing attach / inspect / click flow still works
+1. `Focus` is real
+2. `SetValue` is real
+3. changed state is proven through inspect after settle
+4. the three-stage test route is followed honestly enough to justify the claim
+5. existing attach / inspect / click / settle functionality still works
 
 Otherwise report:
 
@@ -263,4 +254,4 @@ or
 
 The purpose of this pass is:
 
-> implement the agreed targeting model: process-level selection now, future window-level readiness built in, and no visible `--instance` option.
+> make `blitz-host` capable of driving real input workflows, not just button clicks.

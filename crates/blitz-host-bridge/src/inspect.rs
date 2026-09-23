@@ -34,7 +34,16 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
                     .iter()
                     .find(|a| a.name.local.as_ref() == "role")
                     .map(|a| a.value.to_string());
-                (tag, dom_id, role, None)
+                let text = elem
+                    .text_input_data()
+                    .map(|input| input.editor.raw_text().to_string())
+                    .or_else(|| {
+                        elem.attrs
+                            .iter()
+                            .find(|a| a.name.local.as_ref() == "value")
+                            .map(|a| a.value.to_string())
+                    });
+                (tag, dom_id, role, text)
             }
             NodeData::AnonymousBlock(_) => ("anonymous-block".to_string(), None, None, None),
             NodeData::Text(t) => ("#text".to_string(), None, None, Some(t.content.clone())),
@@ -56,6 +65,9 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
             _ => None,
         };
 
+        let is_focused = doc.get_focussed_node_id() == Some(node_id);
+        let focused = if is_focused { Some(true) } else { None };
+
         let children_ids: Vec<u64> = node.children.iter().map(|c| c.as_u64()).collect();
 
         // Enqueue children
@@ -71,6 +83,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
             role,
             text,
             bounds,
+            focused,
             children: children_ids,
         });
     }
@@ -80,6 +93,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         root_id: root_id.as_u64(),
         node_count: nodes.len(),
         current_frame: None,
+        focused_node_id: doc.get_focussed_node_id().map(|id| id.as_u64()),
         nodes,
     }
 }

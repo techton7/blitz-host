@@ -72,6 +72,9 @@ pub struct SemanticNode {
     /// Layout border box [x, y, width, height] in CSS pixels, if computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f32; 4]>,
+    /// Whether this node currently holds active keyboard focus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<bool>,
     /// Ordered list of child node IDs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<u64>,
@@ -90,6 +93,9 @@ pub struct InspectResponse {
     /// Optional current frame counter observed when the snapshot was taken.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_frame: Option<u64>,
+    /// Optional node ID of the currently focused element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_node_id: Option<u64>,
     /// Flattened pre-order list of semantic nodes.
     pub nodes: Vec<SemanticNode>,
 }
@@ -104,6 +110,21 @@ pub enum ActionRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_id: Option<u64>,
         node_id: u64,
+    },
+    /// Focus a target node.
+    Focus {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        node_id: u64,
+    },
+    /// Set the text/input value of an editable node.
+    SetValue {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        node_id: u64,
+        value: String,
     },
 }
 
@@ -212,6 +233,7 @@ mod tests {
             role: None,
             text: None,
             bounds: Some([0.0, 0.0, 800.0, 600.0]),
+            focused: Some(true),
             children: vec![2, 3],
         };
 
@@ -220,6 +242,7 @@ mod tests {
             root_id: 1,
             node_count: 1,
             current_frame: Some(42),
+            focused_node_id: Some(1),
             nodes: vec![node],
         });
 
@@ -227,7 +250,7 @@ mod tests {
         let parsed: ControlResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);
 
-        // Test Action roundtrip
+        // Test Action roundtrip: Click
         let act_req = ControlRequest::Act(ActionRequest::Click {
             window_id: None,
             node_id: 42,
@@ -235,6 +258,28 @@ mod tests {
         let act_json = serde_json::to_string(&act_req).unwrap();
         let act_parsed: ControlRequest = serde_json::from_str(&act_json).unwrap();
         assert_eq!(act_req, act_parsed);
+
+        // Test Action roundtrip: Focus
+        let focus_req = ControlRequest::Act(ActionRequest::Focus {
+            window_id: Some(10),
+            node_id: 42,
+        });
+        let focus_json = serde_json::to_string(&focus_req).unwrap();
+        assert!(focus_json.contains("\"action\":\"focus\""));
+        let focus_parsed: ControlRequest = serde_json::from_str(&focus_json).unwrap();
+        assert_eq!(focus_req, focus_parsed);
+
+        // Test Action roundtrip: SetValue
+        let set_value_req = ControlRequest::Act(ActionRequest::SetValue {
+            window_id: None,
+            node_id: 42,
+            value: "Hello World".into(),
+        });
+        let set_value_json = serde_json::to_string(&set_value_req).unwrap();
+        assert!(set_value_json.contains("\"action\":\"setValue\""));
+        assert!(set_value_json.contains("\"value\":\"Hello World\""));
+        let set_value_parsed: ControlRequest = serde_json::from_str(&set_value_json).unwrap();
+        assert_eq!(set_value_req, set_value_parsed);
 
         let act_resp = ControlResponse::ActionSuccess(ActionResponse {
             success: true,

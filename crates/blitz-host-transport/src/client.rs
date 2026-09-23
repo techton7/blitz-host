@@ -108,6 +108,35 @@ impl DebugClient {
         self.act(ActionRequest::Click { window_id, node_id })
     }
 
+    /// Convenience helper to focus a specific node by ID on the default/fallback window.
+    pub fn focus(&mut self, node_id: u64) -> io::Result<ActionResponse> {
+        self.focus_window(None, node_id)
+    }
+
+    /// Focus a specific node by ID on a targeted window (or primary fallback if None).
+    pub fn focus_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
+        self.act(ActionRequest::Focus { window_id, node_id })
+    }
+
+    /// Convenience helper to set the value of an input node by ID on the default/fallback window.
+    pub fn set_value(&mut self, node_id: u64, value: impl Into<String>) -> io::Result<ActionResponse> {
+        self.set_value_window(None, node_id, value)
+    }
+
+    /// Set the value of an input node by ID on a targeted window (or primary fallback if None).
+    pub fn set_value_window(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: u64,
+        value: impl Into<String>,
+    ) -> io::Result<ActionResponse> {
+        self.act(ActionRequest::SetValue {
+            window_id,
+            node_id,
+            value: value.into(),
+        })
+    }
+
     /// Synchronize execution by waiting for `frames` VSync / render ticks on the default window.
     pub fn settle(&mut self, frames: u32) -> io::Result<SettleResponse> {
         self.settle_window(None, frames)

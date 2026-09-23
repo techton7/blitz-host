@@ -36,6 +36,7 @@ mod tests {
                         root_id: 42,
                         node_count: 1,
                         current_frame: Some(10),
+                        focused_node_id: None,
                         nodes: vec![SemanticNode {
                             id: 42,
                             parent_id: None,
@@ -44,6 +45,7 @@ mod tests {
                             role: Some("button".into()),
                             text: Some("Click Me".into()),
                             bounds: Some([10.0, 20.0, 100.0, 40.0]),
+                            focused: None,
                             children: vec![],
                         }],
                     }));

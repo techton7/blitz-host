@@ -16,13 +16,15 @@ USAGE:
     blitz-host <SUBCOMMAND>
 
 SUBCOMMANDS:
-    list [OPTIONS]           List active, reachable Blitz desktop host processes
-    inspect [OPTIONS]        Inspect live window semantic DOM & layout tree
-    click <NODE_ID> [OPTIONS] Dispatch a synthetic click action to target element (auto-settles)
+    list [OPTIONS]                 List active, reachable Blitz desktop host processes
+    inspect [OPTIONS]              Inspect live window semantic DOM & layout tree
+    click <NODE_ID> [OPTIONS]       Dispatch a synthetic click action to target element (auto-settles)
+    focus <NODE_ID> [OPTIONS]       Focus target element (auto-settles)
+    set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles)
 
 OPTIONS:
-    -h, --help               Print help information
-    -V, --version            Print version information
+    -h, --help                     Print help information
+    -V, --version                  Print version information
 
 Run 'blitz-host <SUBCOMMAND> --help' for more information on a specific subcommand.
 
@@ -38,6 +40,12 @@ EXAMPLES:
     # Click a node
     blitz-host click 4294967402
     blitz-host click 4294967402 --pid 37462
+
+    # Focus an input node
+    blitz-host focus 4294967405 --pid 37462
+
+    # Set value on an input node
+    blitz-host set-value 4294967405 "Hello Blitz" --pid 37462
 "#
     );
 }
@@ -119,6 +127,61 @@ NOTE:
 EXAMPLES:
     blitz-host click 4294967402
     blitz-host click 4294967402 --pid 37462
+"#
+    );
+}
+
+fn print_focus_help() {
+    println!(
+        r#"blitz-host-focus: Focus a target node in a live Blitz window.
+
+USAGE:
+    blitz-host focus <NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    <NODE_ID>                Target node integer ID to focus (e.g. 4294967405)
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+NOTE:
+    Automatically settles 2 VSync frames after dispatching focus
+    to ensure focus styling and event propagation have completed.
+
+EXAMPLES:
+    blitz-host focus 4294967405
+    blitz-host focus 4294967405 --pid 37462
+"#
+    );
+}
+
+fn print_set_value_help() {
+    println!(
+        r#"blitz-host-set-value: Set text value on an input element in a live Blitz window.
+
+USAGE:
+    blitz-host set-value <NODE_ID> <VALUE> [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    <NODE_ID>                Target node integer ID of input element (e.g. 4294967405)
+    <VALUE>                  Text string to inject into the input element
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+NOTE:
+    Automatically settles 2 VSync frames after setting the value
+    to ensure reactive signal updates and layout recalculations have completed.
+
+EXAMPLES:
+    blitz-host set-value 4294967405 "Hello Blitz"
+    blitz-host set-value 4294967405 "Hello Blitz" --pid 37462
 "#
     );
 }
@@ -316,9 +379,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .unwrap_or_default();
 
+                let focus_str = if node.focused == Some(true) { " [FOCUSED]" } else { "" };
+
                 println!(
-                    "{}{} {}{}{}{}{}",
-                    indent, id_str, tag_str, dom_id_str, role_str, text_str, bounds_str
+                    "{}{} {}{}{}{}{}{}",
+                    indent, id_str, tag_str, dom_id_str, role_str, text_str, bounds_str, focus_str
                 );
             }
 
@@ -381,6 +446,151 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("=================================================================");
             println!("[blitz-host] Click action completed and settled successfully!");
+            Ok(())
+        }
+        "focus" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_focus_help();
+                return Ok(());
+            }
+
+            let node_id_str = subargs.iter().find(|a| {
+                !a.starts_with('-')
+                    && !a.ends_with(".json")
+                    && !a.ends_with(".sock")
+                    && a.parse::<u64>().is_ok()
+            });
+            let node_id: u64 = match node_id_str.and_then(|s| s.parse().ok()) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Error: 'focus' requires a target <NODE_ID> argument.");
+                    eprintln!("Run 'blitz-host focus --help' for usage.");
+                    std::process::exit(1);
+                }
+            };
+
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching focus action to node #{} (PID: {})...",
+                node_id,
+                client.descriptor().pid
+            );
+            let act_res = client.focus_window(window_id, node_id)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            // Auto-settle 2 frames to ensure DOM and layout mutation settled
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Focus action completed and settled successfully!");
+            Ok(())
+        }
+        "set-value" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_set_value_help();
+                return Ok(());
+            }
+
+            // Extract positional non-flag arguments (skip flags and flag arguments)
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            if positional.is_empty() {
+                eprintln!("Error: 'set-value' requires target <NODE_ID> and <VALUE> arguments.");
+                eprintln!("Run 'blitz-host set-value --help' for usage.");
+                std::process::exit(1);
+            }
+
+            let node_id: u64 = match positional[0].parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
+                    std::process::exit(1);
+                }
+            };
+
+            let value = if positional.len() > 1 {
+                positional[1].to_string()
+            } else {
+                String::new()
+            };
+
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching set-value action (value: {:?}) to node #{} (PID: {})...",
+                value,
+                node_id,
+                client.descriptor().pid
+            );
+            let act_res = client.set_value_window(window_id, node_id, value)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            // Auto-settle 2 frames to ensure DOM and layout mutation settled
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Set-value action completed and settled successfully!");
             Ok(())
         }
         unknown => {

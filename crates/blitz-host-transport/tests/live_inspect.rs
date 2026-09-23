@@ -15,6 +15,7 @@ fn test_live_native_runner_attach_and_inspect() {
 
     println!("Starting oxidase-native-runner in feature-enabled dev mode (no --debug-control flag)...");
     let mut child = Command::new(runner_path)
+        .arg("--interactive")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -175,11 +176,141 @@ fn test_live_native_runner_attach_and_inspect() {
         "Second click must update state to 'Clicked 2 times'"
     );
 
+    // =========================================================================
+    // STEP 5: Locate Input Node & Verify Initial Focus State
+    // =========================================================================
+    let input_node = settled_snapshot
+        .nodes
+        .iter()
+        .find(|n| n.tag == "input" || n.dom_id.as_deref() == Some("test-input"))
+        .expect("must find input node in live component tree");
+    let input_id = input_node.id;
+    println!("  • Found input node #{} (dom_id: {:?})", input_id, input_node.dom_id);
+    assert_ne!(input_node.focused, Some(true), "input node must not be focused initially");
+
+    // =========================================================================
+    // STEP 6: Act (Dispatch Focus Action) & Settle
+    // =========================================================================
+    println!("Dispatching focus action to input node #{}...", input_id);
+    let focus_resp = client.focus(input_id).expect("focus action failed");
+    println!("Focus Response: success={}, message={:?}", focus_resp.success, focus_resp.message);
+    assert!(focus_resp.success, "focus response must indicate success");
+
+    println!("Sending settle request for 2 frames after focus...");
+    let settle_focus = client.settle(2).expect("settle request after focus failed");
+    assert!(settle_focus.settled);
+
+    let post_focus_inspect = client
+        .inspect(InspectRequest::default())
+        .expect("post-focus inspect failed");
+
+    let post_focus_input = post_focus_inspect
+        .nodes
+        .iter()
+        .find(|n| n.id == input_id)
+        .expect("input node must still exist");
+
+    println!("  • Observed focused_node_id: {:?}", post_focus_inspect.focused_node_id);
+    println!("  • Observed input.focused: {:?}", post_focus_input.focused);
+    assert_eq!(
+        post_focus_inspect.focused_node_id,
+        Some(input_id),
+        "CRITICAL PROOF: focused_node_id in InspectResponse must equal input_id"
+    );
+    assert_eq!(
+        post_focus_input.focused,
+        Some(true),
+        "CRITICAL PROOF: input node SemanticNode must have focused == Some(true)"
+    );
+
+    // Verify Dioxus rendered the conditional span#focus-indicator
+    let has_focus_indicator = post_focus_inspect.nodes.iter().any(|n| {
+        n.dom_id.as_deref() == Some("focus-indicator")
+            || extract_text_under(&post_focus_inspect.nodes, n.id).as_deref() == Some("FOCUSED")
+    });
+    println!("  • Conditional focus indicator rendered: {}", has_focus_indicator);
+    assert!(
+        has_focus_indicator,
+        "CRITICAL PROOF: Dioxus must render focus indicator span in response to onfocus event"
+    );
+
+    // =========================================================================
+    // STEP 7: Act (Dispatch SetValue Action) & Settle
+    // =========================================================================
+    let test_typed_str = "Hello from blitz-host live test!";
+    println!("Dispatching set_value action to input node #{} with value {:?}...", input_id, test_typed_str);
+    let set_val_resp = client.set_value(input_id, test_typed_str).expect("set_value action failed");
+    println!("SetValue Response: success={}, message={:?}", set_val_resp.success, set_val_resp.message);
+    assert!(set_val_resp.success, "set_value response must indicate success");
+
+    println!("Sending settle request for 2 frames after set_value...");
+    let settle_val = client.settle(2).expect("settle request after set_value failed");
+    assert!(settle_val.settled);
+
+    let post_val_inspect = client
+        .inspect(InspectRequest::default())
+        .expect("post-set_value inspect failed");
+
+    let post_val_input = post_val_inspect
+        .nodes
+        .iter()
+        .find(|n| n.id == input_id)
+        .expect("input node must exist");
+    println!("  • Input node text/value: {:?}", post_val_input.text);
+    assert_eq!(
+        post_val_input.text.as_deref(),
+        Some(test_typed_str),
+        "CRITICAL PROOF: Input element text/value must match set value"
+    );
+
+    // Verify Dioxus oninput handler updated reactive signal rendering in p#typed-text
+    let typed_p_node = post_val_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("typed-text"))
+        .expect("must find p#typed-text in semantic tree");
+    let typed_p_text = extract_text_under(&post_val_inspect.nodes, typed_p_node.id);
+    println!("  • Observed p#typed-text: {:?}", typed_p_text);
+    let expected_p_text = format!("Typed: {test_typed_str}");
+    assert_eq!(
+        typed_p_text.as_deref(),
+        Some(expected_p_text.as_str()),
+        "CRITICAL PROOF: oninput event must trigger Dioxus reactivity and update p#typed-text"
+    );
+
+    // =========================================================================
+    // STEP 8: Continuous Reactivity - Second SetValue with settle_until
+    // =========================================================================
+    let second_test_str = "Continuous reactivity 42";
+    println!("Dispatching second set_value: {:?}", second_test_str);
+    let set_val2_resp = client.set_value(input_id, second_test_str).expect("second set_value failed");
+    assert!(set_val2_resp.success);
+
+    let expected_p_text2 = format!("Typed: {second_test_str}");
+    let settled_val_snapshot = client
+        .settle_until(Duration::from_secs(5), |snap| {
+            if let Some(p) = snap.nodes.iter().find(|n| n.dom_id.as_deref() == Some("typed-text")) {
+                extract_text_under(&snap.nodes, p.id).as_deref() == Some(expected_p_text2.as_str())
+            } else {
+                false
+            }
+        })
+        .expect("settle_until timed out waiting for second typed text");
+
+    let final_typed_p = settled_val_snapshot
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("typed-text"))
+        .unwrap();
+    let final_typed_text = extract_text_under(&settled_val_snapshot.nodes, final_typed_p.id);
+    println!("  • Final typed text after settle_until: {:?}", final_typed_text);
+    assert_eq!(final_typed_text.as_deref(), Some(expected_p_text2.as_str()));
+
     // Terminate child process cleanly
     let _ = child.kill();
     let _ = child.wait();
 
     println!("=================================================================");
-    println!("LIVE ATTACH, ACT, SETTLE, AND STATE-CHANGE PROOF PASSED 100%!");
+    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, AND SETTLE PROOF PASSED 100%!");
     println!("=================================================================");
 }

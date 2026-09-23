@@ -34,7 +34,7 @@ impl HostBridge {
     }
 
     /// Legacy single-frame inspect poll without action execution.
-    pub fn poll_and_service(&mut self, doc: &BaseDocument) -> usize {
+    pub fn poll_and_service(&mut self, doc: &mut BaseDocument) -> usize {
         self.poll_and_service_with(doc, 0, |_act, _doc| {
             Err("Action dispatcher not configured".to_string())
         })
@@ -46,9 +46,9 @@ impl HostBridge {
     /// Returns the number of requests serviced during this poll.
     pub fn poll_and_service_with(
         &mut self,
-        doc: &BaseDocument,
+        doc: &mut BaseDocument,
         current_frame: u64,
-        mut dispatch_action: impl FnMut(&ActionRequest, &BaseDocument) -> Result<ActionResponse, String>,
+        mut dispatch_action: impl FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     ) -> usize {
         let mut serviced = 0;
 
