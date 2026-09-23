@@ -157,18 +157,20 @@ impl HostControl {
         0
     }
 
-    /// Dispatches UI actions (Click, Focus, SetValue) using provided closures.
-    pub fn handle_action<C, F, S>(
+    /// Dispatches UI actions (Click, Focus, SetValue, Key) using provided closures.
+    pub fn handle_action<C, F, S, K>(
         action_req: &ActionRequest,
         base_doc: &mut BaseDocument,
         mut click_fn: C,
         mut focus_fn: F,
         mut set_value_fn: S,
+        mut key_fn: K,
     ) -> Result<ActionResponse, String>
     where
         C: FnMut(&mut BaseDocument, u64) -> bool,
         F: FnMut(&mut BaseDocument, u64) -> bool,
         S: FnMut(&mut BaseDocument, u64, &str) -> bool,
+        K: FnMut(&mut BaseDocument, Option<u64>, &str, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
     {
         match action_req {
             ActionRequest::Click { node_id, .. } => {
@@ -202,6 +204,16 @@ impl HostControl {
                     })
                 } else {
                     Err(format!("Node #{node_id} not found or not an editable target"))
+                }
+            }
+            ActionRequest::Key { node_id, key, modifiers, .. } => {
+                match key_fn(base_doc, *node_id, key, *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        message: Some(format!("Dispatched synthetic key '{key}' to node #{target_nid}")),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
                 }
             }
         }

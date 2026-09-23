@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use blitz_host::client::{DebugClient, TargetSelector};
-use blitz_host::protocol::InspectRequest;
+use blitz_host::protocol::{InspectRequest, KeyModifiers};
 
 fn print_main_help() {
     println!(
@@ -22,6 +22,7 @@ SUBCOMMANDS:
     click <NODE_ID> [OPTIONS]       Dispatch a synthetic click action to target element (auto-settles)
     focus <NODE_ID> [OPTIONS]       Focus target element (auto-settles)
     set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles)
+    key <KEY> [OPTIONS]            Dispatch a synthetic key event (auto-settles)
 
 OPTIONS:
     -h, --help                     Print help information
@@ -222,12 +223,72 @@ EXAMPLES:
     );
 }
 
+fn print_key_help() {
+    println!(
+        r#"blitz-host-key: Dispatch a synthetic key event to a live Blitz window.
+
+USAGE:
+    blitz-host key <KEY> [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    <KEY>                    Key name or compound specifier (e.g. Tab, Shift+Tab, Enter, Space, Escape, Backspace, Delete, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, a, z)
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --node <NODE_ID>     Target specific node integer ID (e.g. 4294967405). If omitted, dispatches to currently focused element.
+        --shift              Hold Shift modifier
+        --ctrl               Hold Ctrl modifier
+        --alt                Hold Alt/Option modifier
+        --meta               Hold Meta/Cmd modifier
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+NOTE:
+    Automatically settles 2 VSync frames after dispatching the key
+    to ensure reactive updates and layout recalculations have completed.
+
+EXAMPLES:
+    # 1. Focus traversal
+    blitz-host key Tab
+    blitz-host key Tab --shift
+    blitz-host key Shift+Tab
+
+    # 2. Focus clearing
+    blitz-host key Escape
+
+    # 3. Activation
+    blitz-host key Enter
+    blitz-host key Space
+
+    # 4. Text editing
+    blitz-host key a --node 4294967405
+    blitz-host key Backspace --node 4294967405
+
+    # 5. Select all
+    blitz-host key a --meta --node 4294967405
+"#
+    );
+}
+
 fn parse_pid_arg(args: &[String]) -> Option<u32> {
     for i in 0..args.len() {
         if args[i] == "--pid" && i + 1 < args.len() {
             return args[i + 1].parse().ok();
         }
         if let Some(rest) = args[i].strip_prefix("--pid=") {
+            return rest.parse().ok();
+        }
+    }
+    None
+}
+
+fn parse_node_arg(args: &[String]) -> Option<u64> {
+    for i in 0..args.len() {
+        if args[i] == "--node" && i + 1 < args.len() {
+            return args[i + 1].parse().ok();
+        }
+        if let Some(rest) = args[i].strip_prefix("--node=") {
             return rest.parse().ok();
         }
     }
@@ -716,6 +777,98 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("=================================================================");
             println!("[blitz-host] Set-value action completed and settled successfully!");
+            Ok(())
+        }
+        "key" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_key_help();
+                return Ok(());
+            }
+
+            // Extract positional non-flag arguments
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--node" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--node=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            if positional.is_empty() {
+                eprintln!("Error: 'key' requires a <KEY> argument (e.g. Tab, Shift+Tab, Enter, Space, Escape, Backspace).");
+                eprintln!("Run 'blitz-host key --help' for usage.");
+                std::process::exit(1);
+            }
+
+            let key_str = positional[0];
+            let node_id = parse_node_arg(subargs);
+            let window_id = parse_window_arg(subargs);
+            let shift = subargs.iter().any(|a| a == "--shift");
+            let ctrl = subargs.iter().any(|a| a == "--ctrl");
+            let alt = subargs.iter().any(|a| a == "--alt");
+            let meta = subargs.iter().any(|a| a == "--meta" || a == "--cmd");
+            let modifiers = if shift || ctrl || alt || meta {
+                Some(KeyModifiers {
+                    shift,
+                    ctrl,
+                    alt,
+                    meta,
+                })
+            } else {
+                None
+            };
+
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching key action '{key_str}' (node: {:?}, modifiers: {:?}) (PID: {})...",
+                node_id,
+                modifiers,
+                client.descriptor().pid
+            );
+            let act_res = client.key_with_modifiers(window_id, node_id, key_str, modifiers)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            // Auto-settle 2 frames to ensure DOM and layout mutation settled
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Key action completed and settled successfully!");
             Ok(())
         }
         unknown => {

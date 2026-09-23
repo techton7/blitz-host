@@ -1,4 +1,4 @@
-# Worker Instruction: Add a Minimal `capture` / Visual Proof Lane to `blitz-host`
+# Worker Instruction: Expand `blitz-host` to a Bounded Core Keyboard Lane
 
 You are working in:
 
@@ -6,7 +6,7 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current stack already proves:
+The current `blitz-host` stack already proves:
 
 1. attach
 2. inspect
@@ -14,11 +14,10 @@ The current stack already proves:
 4. focus
 5. set-value
 6. settle
-7. deterministic process targeting
+7. capture
+8. process targeting
 
-The next major `blitz-host`-specific value is now:
-
-> **visual proof beyond semantic DOM — a minimal capture path**
+The next slice should now expand beyond the initial two-key idea into a **bounded core keyboard lane**.
 
 Write all agent-facing reasoning in English.
 
@@ -35,147 +34,190 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Implement the smallest useful visual capture lane for `blitz-host`.
+Add the smallest *useful* core keyboard surface for real workflow automation.
 
-This should let an external client prove not only:
+This pass should cover:
 
-1. what the semantic tree says
-2. what the input state says
+### A. Focus / activation keys
 
-but also:
+1. `Tab`
+2. `Shift+Tab`
+3. `Enter`
+4. `Space`
+5. `Escape`
 
-3. what the rendered output actually looks like
+### B. Text editing essentials
 
-The core question is:
+1. `Backspace`
+2. `Delete`
 
-> can `blitz-host` capture a real visual result from the running native host in a way that is useful for debugging and proof?
+### C. Navigation essentials
+
+1. `ArrowLeft`
+2. `ArrowRight`
+3. `ArrowUp`
+4. `ArrowDown`
+
+### D. One modifier sentinel
+
+1. **`Ctrl/Cmd + A`** as the explicit modifier-path proof case
+
+The purpose is not “all keyboard behavior forever.”
+
+The purpose is:
+
+> prove that the real keyboard injection path is broad enough to drive common app workflows, including one meaningful modifier combination.
 
 ---
 
-## 2. Scope Boundary
+## 2. Responsibility Boundary
 
-Keep this slice intentionally small.
+Keep the responsibility split honest:
 
-### Must aim for
+1. **Blitz / Dioxus Native own keyboard semantics**
+   - focus traversal behavior
+   - submit behavior
+   - selection behavior
+   - text editing behavior
+2. **`blitz-host` owns**
+   - key injection surface
+   - transport/protocol expression
+   - settle / inspect observation
+   - black-box proof that the real runtime behavior happened
 
-1. one-shot capture
-2. a useful output format
-3. proof against a live native host
+Do **not** re-implement browser/editor semantics inside `blitz-host`.
+
+This is a control-plane proof task, not a new text engine.
+
+---
+
+## 3. Scope Boundary
+
+### Must implement
+
+1. a typed keyboard action surface sufficient for the core key set above
+2. modifier support sufficient for `Ctrl/Cmd + A`
+3. black-box proof targets that demonstrate real workflow effects
 
 ### Explicitly defer
 
 Do **not** expand into:
 
-1. streaming/video
-2. diff engines
-3. per-node region capture unless almost free
-4. large visual tooling suite
-5. keyboard matrix expansion in this pass
+1. full shortcut matrix
+2. IME / composition
+3. clipboard shortcuts
+4. platform-specific accelerator universe
+5. giant editor behavior suite
 
-This pass is about the first real visual proof seam.
-
----
-
-## 3. Preferred Minimal Outcome
-
-The preferred first capture target is:
-
-1. capture the current rendered window/document view
-2. return it in a practical machine-usable format
-3. prove it against a running native host
-
-Reasonable output forms include:
-
-1. PNG bytes
-2. base64-encoded image payload
-3. a file output path written by the CLI if that is the cleanest practical surface
-
-Pick the smallest honest form that fits the current renderer/runtime seams.
+Keep it to the bounded core set.
 
 ---
 
-## 4. Architectural Guidance
+## 4. Preferred Proof Targets
 
-### A. Treat capture as a `blitz-host` concern
+You must prove keyboard behavior through inspect-visible workflow changes.
 
-This is exactly the kind of feature that is more `blitz-host`-specific than `blitz`-generic:
+### A. Focus traversal proof
 
-1. transporting proof artifacts
-2. turning renderer state into debug-observable output
-3. exposing that through CLI/client APIs
+Use `Tab` / `Shift+Tab` to prove:
 
-So this is a better next expansion than a giant keyboard behavior matrix.
+1. focus moves between expected elements
+2. inspect reflects the new focused node
 
-### B. Stay honest about what seam you use
+### B. Submit / activation proof
 
-If the current stack only allows:
+Use `Enter` and/or `Space` to prove:
 
-1. window-level full capture
-2. or host-level framebuffer capture
+1. a focused button or submit target activates
+2. a visible status / state change occurs
 
-then implement that and say so.
+### C. Editing proof
 
-Do not imply subtree or exact per-node screenshots unless you really have them.
+Use `Backspace` / `Delete` / arrow keys as appropriate to prove:
 
-### C. If blocked, produce a real blocker
+1. text editing state changes
+2. cursor/navigation-sensitive behavior is actually going through the runtime
 
-If direct capture is not honestly implementable with the current Blitz/Vello/runtime seams, do not fake it.
+### D. Modifier sentinel proof
 
-Instead:
+Use **`Ctrl/Cmd + A`** to prove modifier-path integrity.
 
-1. inspect the available renderer/readback hooks
-2. attempt the smallest honest implementation
-3. if blocked, report the concrete seam missing
+The preferred black-box scenario is:
 
-This is acceptable if the evidence is solid.
+1. set an input to a known longer string
+2. focus the input
+3. inject `Ctrl/Cmd + A`
+4. replace or overwrite text afterward
+5. inspect and prove the replacement happened as expected
 
----
+This gives you real coverage of:
 
-## 5. Suggested Implementation Shape
-
-If feasible, the likely path is:
-
-1. protocol:
-   - add `CaptureRequest`
-   - add `CaptureResponse`
-2. bridge / host:
-   - invoke the smallest available native capture/readback path
-3. transport/client:
-   - expose `capture(...)`
-4. CLI:
-   - add `blitz-host capture`
-   - optionally write to a file or stdout/json depending on the cleanest UX
-
-Keep the user-facing interface small and practical.
+1. modifier serialization
+2. platform-aware mapping
+3. selection pipeline
+4. follow-up editing behavior
 
 ---
 
-## 6. Proof Targets
+## 5. Platform Mapping Rule
 
-Use the existing established lanes:
+For the modifier sentinel, be honest about platform reality:
 
-### A. Canonical cross-host example
+1. macOS should use `Cmd+A`
+2. Windows/Linux should use `Ctrl+A`
 
-Use `cross_host` as the first conceptual proof target when appropriate.
+If you introduce a higher-level “select all” semantic helper internally, that is acceptable.
 
-### B. Native proof harness
+If you keep a raw key+modifier surface, that is also acceptable.
 
-Use `oxidase-native-runner` as the native proof harness if it is the easiest place to verify capture correctness and stability.
+But the proof must explicitly show that modifier-aware behavior works on the current native target.
 
-If one target is clearly more practical for the first capture proof, use it first and explain why.
+---
+
+## 6. Preferred Test Route
+
+Use the same honest three-stage route:
+
+### Stage 1 — protocol / transport unit route
+
+Validate:
+
+1. serialization of the new keyboard action surface
+2. transport/client request and response handling
+3. no regression in existing control-plane features
+
+### Stage 2 — headless semantics route
+
+Use the cheapest honest route available (for example a headless Dioxus/Blitz harness) to verify:
+
+1. `Tab` / `Shift+Tab`
+2. `Enter` / `Space`
+3. editing keys
+4. `Ctrl/Cmd + A`
+
+This is where you cheaply falsify bad key injection or event-model assumptions.
+
+### Stage 3 — live native E2E route
+
+Final proof should use:
+
+1. canonical `cross_host` example as the first public-consumer proof target
+2. `oxidase-native-runner` as the secondary/native-proof harness target if useful
+
+The first-class story should still be the canonical consumer example where practical.
 
 ---
 
 ## 7. What Not to Do
 
-1. do not overpromise subtree capture if you only have full-window capture
-2. do not treat semantic inspection and capture as the same thing
-3. do not skip proof and stop at a compile-only transport shape
-4. do not turn this into a giant media/export subsystem
+1. do not expand to full keyboard universe
+2. do not claim coverage of all modifiers just because `Ctrl/Cmd + A` works
+3. do not stop at “request returned success”
+4. do not let hidden internal state replace inspect-visible proof
 
-Keep it to:
+This pass should remain:
 
-> first honest visual proof
+> core keyboard workflow support, not total keyboard completeness.
 
 ---
 
@@ -188,20 +230,25 @@ At minimum:
 3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
 4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
 5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-6. relevant renderer / Vello / Blitz host seams that could support capture or readback
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/`
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
+8. any headless harness route suitable for cheap keyboard semantics validation
 
 ---
 
 ## 9. Validation You Must Run
 
-Run the smallest commands that honestly prove the capture lane.
+Run the smallest commands that honestly prove the slice.
 
 At minimum:
 
-1. protocol / transport tests for the new capture surface
-2. any renderer-side or bridge-side focused checks needed for capture
-3. live native proof against a running host
-4. confirmation that existing attach / inspect / click / focus / set-value flows still work
+1. protocol / transport tests for the new keyboard surface
+2. a headless semantics proof for the bounded core key set
+3. live native E2E against `cross_host`
+4. continued proof or regression checks against `oxidase-native-runner`
+5. confirmation that attach / inspect / click / focus / set-value / capture still work after the change
+
+Do not call this complete if only the low-level request succeeds but the workflow effect is unproven.
 
 If markdown files are edited, validate them.
 
@@ -215,12 +262,14 @@ Update:
 
 It must explicitly record:
 
-1. what capture surface was added
-2. what exactly is captured (full window, document, etc.)
-3. what format is returned or written
-4. what live proof was observed
-5. what remains deferred
-6. if blocked, the exact renderer/runtime seam that blocked honest capture
+1. what keyboard action surface was added
+2. how focus traversal was proven
+3. how submit/activation was proven
+4. how editing/navigation was proven
+5. how the modifier sentinel (`Ctrl/Cmd + A`) was proven
+6. what headless semantics route was used
+7. what live E2E proof was observed
+8. what remains deferred
 
 ---
 
@@ -228,10 +277,11 @@ It must explicitly record:
 
 You may report **Implemented and proven** only if:
 
-1. a real capture surface exists
-2. it works against a live native host
-3. its scope is stated honestly
-4. the existing control-plane proof path still works
+1. the bounded core key set is real
+2. `Ctrl/Cmd + A` proves modifier-path integrity
+3. the resulting workflow changes are inspect-visible after settle
+4. the proof remains black-box and honest
+5. existing control-plane functionality still works
 
 Otherwise report:
 
@@ -241,4 +291,4 @@ or
 
 The purpose of this pass is:
 
-> give `blitz-host` its first real visual proof capability beyond semantic DOM inspection.
+> turn `blitz-host` from click/input primitives into a bounded but genuinely useful keyboard workflow control surface.

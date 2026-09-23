@@ -126,6 +126,83 @@ pub enum ActionRequest {
         node_id: u64,
         value: String,
     },
+    /// Inject a keypress action.
+    Key {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        /// Optional target node handle (falls back to currently focused element or root if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        /// Key name or character to inject (e.g. "Tab", "Enter", "Space", "Backspace", "a").
+        key: String,
+        /// Modifier keys held during the keypress.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modifiers: Option<KeyModifiers>,
+    },
+}
+
+/// Modifier keys held during a key action.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyModifiers {
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub meta: bool,
+}
+
+impl KeyModifiers {
+    pub const NONE: Self = Self {
+        shift: false,
+        ctrl: false,
+        alt: false,
+        meta: false,
+    };
+    pub const SHIFT: Self = Self {
+        shift: true,
+        ctrl: false,
+        alt: false,
+        meta: false,
+    };
+    pub const CTRL: Self = Self {
+        shift: false,
+        ctrl: true,
+        alt: false,
+        meta: false,
+    };
+    pub const ALT: Self = Self {
+        shift: false,
+        ctrl: false,
+        alt: true,
+        meta: false,
+    };
+    pub const META: Self = Self {
+        shift: false,
+        ctrl: false,
+        alt: false,
+        meta: true,
+    };
+
+    /// Platform-appropriate action modifier (Cmd on macOS, Ctrl on Windows/Linux).
+    pub fn action_modifier() -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            Self::META
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Self::CTRL
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.shift && !self.ctrl && !self.alt && !self.meta
+    }
 }
 
 /// Result of executing an action.
@@ -348,6 +425,31 @@ mod tests {
         assert!(cap_req_json.contains("\"type\":\"capture\""));
         let cap_req_parsed: ControlRequest = serde_json::from_str(&cap_req_json).unwrap();
         assert_eq!(cap_req, cap_req_parsed);
+
+        // Test Action roundtrip: Key
+        let key_req = ControlRequest::Act(ActionRequest::Key {
+            window_id: None,
+            node_id: Some(101),
+            key: "Tab".into(),
+            modifiers: Some(KeyModifiers::SHIFT),
+        });
+        let key_json = serde_json::to_string(&key_req).unwrap();
+        assert!(key_json.contains("\"action\":\"key\""));
+        assert!(key_json.contains("\"key\":\"Tab\""));
+        assert!(key_json.contains("\"shift\":true"));
+        let key_parsed: ControlRequest = serde_json::from_str(&key_json).unwrap();
+        assert_eq!(key_req, key_parsed);
+
+        // Test Action roundtrip: Key with modifier sentinel (Cmd/Ctrl + A)
+        let sentinel_req = ControlRequest::Act(ActionRequest::Key {
+            window_id: None,
+            node_id: None,
+            key: "a".into(),
+            modifiers: Some(KeyModifiers::action_modifier()),
+        });
+        let sentinel_json = serde_json::to_string(&sentinel_req).unwrap();
+        let sentinel_parsed: ControlRequest = serde_json::from_str(&sentinel_json).unwrap();
+        assert_eq!(sentinel_req, sentinel_parsed);
 
         let cap_resp = ControlResponse::CaptureSuccess(CaptureResponse {
             success: true,

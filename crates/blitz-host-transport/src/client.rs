@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use base64::prelude::*;
 use blitz_host_protocol::{
     ActionRequest, ActionResponse, CaptureRequest, CaptureResponse, ControlRequest,
-    ControlResponse, HostDescriptor, InspectRequest, InspectResponse, SettleRequest,
-    SettleResponse,
+    ControlResponse, HostDescriptor, InspectRequest, InspectResponse, KeyModifiers,
+    SettleRequest, SettleResponse,
 };
 
 /// Client used by agents or test runners to interact with a live running Blitz host.
@@ -137,6 +137,72 @@ impl DebugClient {
             node_id,
             value: value.into(),
         })
+    }
+
+    /// Dispatch synthetic key event with optional modifiers to an optional targeted node.
+    pub fn key_with_modifiers(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        key: impl Into<String>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        self.act(ActionRequest::Key {
+            window_id,
+            node_id,
+            key: key.into(),
+            modifiers,
+        })
+    }
+
+    /// Dispatch synthetic key event to an optional targeted node.
+    pub fn key(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        key: impl Into<String>,
+    ) -> io::Result<ActionResponse> {
+        self.key_with_modifiers(window_id, node_id, key, None)
+    }
+
+    /// Focus next node via Tab key.
+    pub fn tab(&mut self) -> io::Result<ActionResponse> {
+        self.key(None, None, "Tab")
+    }
+
+    /// Focus previous node via Shift+Tab.
+    pub fn shift_tab(&mut self) -> io::Result<ActionResponse> {
+        self.key_with_modifiers(None, None, "Tab", Some(KeyModifiers::SHIFT))
+    }
+
+    /// Activate focused node or submit via Enter key.
+    pub fn enter(&mut self) -> io::Result<ActionResponse> {
+        self.key(None, None, "Enter")
+    }
+
+    /// Activate focused node via Space key.
+    pub fn space(&mut self) -> io::Result<ActionResponse> {
+        self.key(None, None, "Space")
+    }
+
+    /// Clear focus or dismiss via Escape key.
+    pub fn escape(&mut self) -> io::Result<ActionResponse> {
+        self.key(None, None, "Escape")
+    }
+
+    /// Delete preceding character via Backspace.
+    pub fn backspace(&mut self, node_id: Option<u64>) -> io::Result<ActionResponse> {
+        self.key(None, node_id, "Backspace")
+    }
+
+    /// Delete following character via Delete.
+    pub fn delete(&mut self, node_id: Option<u64>) -> io::Result<ActionResponse> {
+        self.key(None, node_id, "Delete")
+    }
+
+    /// Select all text via platform modifier (Ctrl+A on Linux/Windows, Cmd+A on macOS).
+    pub fn select_all(&mut self, node_id: Option<u64>) -> io::Result<ActionResponse> {
+        self.key_with_modifiers(None, node_id, "a", Some(KeyModifiers::action_modifier()))
     }
 
     /// Synchronize execution by waiting for `frames` VSync / render ticks on the default window.

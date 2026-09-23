@@ -307,7 +307,132 @@ fn test_live_native_runner_attach_and_inspect() {
     assert_eq!(final_typed_text.as_deref(), Some(expected_p_text2.as_str()));
 
     // =========================================================================
-    // STEP 9: Visual Capture Proof (Live Visual Screenshot PNG)
+    // STEP 9: Live Core Keyboard Lane Verification
+    // =========================================================================
+    println!("Testing live core keyboard lane against running native host...");
+
+    // 9.1: Button activation via Enter
+    let focus_btn_resp = client.focus(button_id).expect("focus button failed");
+    assert!(focus_btn_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    println!("Dispatching Enter key to focused button...");
+    let enter_resp = client.enter().expect("enter key dispatch failed");
+    assert!(enter_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_enter_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let text_after_enter = extract_text_under(&post_enter_inspect.nodes, button_id);
+    println!("  • Button label after Enter: {:?}", text_after_enter);
+    assert_eq!(
+        text_after_enter.as_deref(),
+        Some("Clicked 3 times"),
+        "CRITICAL PROOF: Enter key on button must trigger onclick and increment count"
+    );
+
+    // 9.2: Button activation via Space
+    println!("Dispatching Space key to focused button...");
+    let space_resp = client.space().expect("space key dispatch failed");
+    assert!(space_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_space_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let text_after_space = extract_text_under(&post_space_inspect.nodes, button_id);
+    println!("  • Button label after Space: {:?}", text_after_space);
+    assert_eq!(
+        text_after_space.as_deref(),
+        Some("Clicked 4 times"),
+        "CRITICAL PROOF: Space key on button must trigger onclick and increment count"
+    );
+
+    // 9.3: Focus traversal via Shift+Tab back to input
+    println!("Dispatching Shift+Tab to focus input...");
+    let stab_resp = client.shift_tab().expect("shift_tab key dispatch failed");
+    assert!(stab_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_stab_inspect = client.inspect(InspectRequest::default()).unwrap();
+    println!("  • Focused node after Shift+Tab: {:?}", post_stab_inspect.focused_node_id);
+    assert_eq!(
+        post_stab_inspect.focused_node_id,
+        Some(input_id),
+        "CRITICAL PROOF: Shift+Tab must navigate focus to input"
+    );
+
+    // 9.4: Text editing - Select All (Ctrl/Cmd + A) and overwrite
+    println!("Testing Select All (Cmd/Ctrl + A) and overwrite on input...");
+    let sel_all_resp = client.select_all(Some(input_id)).expect("select_all failed");
+    assert!(sel_all_resp.success);
+
+    // Type "K" to overwrite
+    let key_k_resp = client.key(None, Some(input_id), "K").expect("typing K failed");
+    assert!(key_k_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_overwrite_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let typed_p_after = post_overwrite_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("typed-text"))
+        .expect("must find typed-text");
+    let typed_text_after = extract_text_under(&post_overwrite_inspect.nodes, typed_p_after.id);
+    println!("  • Typed text after Cmd/Ctrl+A + 'K': {:?}", typed_text_after);
+    assert_eq!(
+        typed_text_after.as_deref(),
+        Some("Typed: K"),
+        "CRITICAL PROOF: Select all and typing 'K' must overwrite previous value"
+    );
+
+    // 9.5: Text editing - Type additional character and delete with Backspace
+    let key_q_resp = client.key(None, Some(input_id), "Q").expect("typing Q failed");
+    assert!(key_q_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_q_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let typed_p_q = post_q_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("typed-text"))
+        .unwrap();
+    assert_eq!(
+        extract_text_under(&post_q_inspect.nodes, typed_p_q.id).as_deref(),
+        Some("Typed: KQ")
+    );
+
+    let bs_resp = client.backspace(Some(input_id)).expect("backspace failed");
+    assert!(bs_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_bs_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let typed_p_bs = post_bs_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("typed-text"))
+        .unwrap();
+    println!("  • Typed text after Backspace: {:?}", extract_text_under(&post_bs_inspect.nodes, typed_p_bs.id));
+    assert_eq!(
+        extract_text_under(&post_bs_inspect.nodes, typed_p_bs.id).as_deref(),
+        Some("Typed: K"),
+        "CRITICAL PROOF: Backspace must delete preceding character"
+    );
+
+    // 9.6: Escape clears focus
+    println!("Dispatching Escape to clear focus...");
+    let esc_resp = client.escape().expect("escape failed");
+    assert!(esc_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_esc_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let post_esc_input = post_esc_inspect.nodes.iter().find(|n| n.id == input_id).unwrap();
+    println!("  • Input focused after Escape: {:?}", post_esc_input.focused);
+    assert_ne!(
+        post_esc_input.focused,
+        Some(true),
+        "CRITICAL PROOF: Escape must clear input focus"
+    );
+
+    // =========================================================================
+    // STEP 10: Visual Capture Proof (Live Visual Screenshot PNG)
     // =========================================================================
     println!("Capturing visual screenshot from live native host...");
     let cap_resp = client.capture().expect("capture request failed");

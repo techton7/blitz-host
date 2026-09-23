@@ -100,6 +100,22 @@ pub fn BlitzHost(children: Element) -> Element {
                                     val,
                                 )
                             },
+                            |d, nid, key, mods| {
+                                let mut kb_mods = keyboard_types::Modifiers::empty();
+                                if let Some(m) = mods {
+                                    if m.shift { kb_mods |= keyboard_types::Modifiers::SHIFT; }
+                                    if m.ctrl { kb_mods |= keyboard_types::Modifiers::CONTROL; }
+                                    if m.alt { kb_mods |= keyboard_types::Modifiers::ALT; }
+                                    if m.meta { kb_mods |= keyboard_types::Modifiers::SUPER; }
+                                }
+                                dioxus_native::dispatch_synthetic_key(
+                                    d,
+                                    nid.map(blitz_dom::NodeId::from_u64),
+                                    key,
+                                    kb_mods,
+                                )
+                                .map(|nid| nid.as_u64())
+                            },
                         )
                     },
                 );
