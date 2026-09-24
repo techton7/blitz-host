@@ -4,10 +4,29 @@ use blitz_host_protocol::{InspectRequest, InspectResponse, SemanticNode};
 /// Inspect a real running Blitz `BaseDocument` and produce a typed `InspectResponse`.
 pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectResponse {
     let document_id = doc.id();
-    let root_id = request
-        .root_node_id
-        .map(NodeId::from_u64)
-        .unwrap_or_else(|| doc.root_node().id);
+    let target = request.target();
+    let root_id = match crate::target::resolve_target_in_doc(
+        doc,
+        target.as_ref(),
+        request.root_node_id,
+        request.selector.as_deref(),
+    ) {
+        Ok(Some(id)) => NodeId::from_u64(id),
+        Ok(None) => doc.root_node().id,
+        Err(err) => {
+            return InspectResponse {
+                document_id,
+                root_id: 0,
+                node_count: 0,
+                current_frame: None,
+                focused_node_id: doc.get_focussed_node_id().map(|id| id.as_u64()),
+                hover_node_id: doc.get_hover_node_id().map(|id| id.as_u64()),
+                viewport_scroll: None,
+                nodes: Vec::new(),
+                message: Some(err),
+            };
+        }
+    };
 
     let max_depth = request.max_depth.unwrap_or(u32::MAX);
 
@@ -121,5 +140,6 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         hover_node_id: doc.get_hover_node_id().map(|id| id.as_u64()),
         viewport_scroll,
         nodes,
+        message: None,
     }
 }

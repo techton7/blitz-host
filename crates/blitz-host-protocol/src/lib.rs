@@ -34,6 +34,53 @@ pub struct HostDescriptor {
     pub primary_document_id: Option<usize>,
 }
 
+/// Target specifier for an element: either a direct ephemeral node ID or a CSS selector string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ElementTarget {
+    /// Ephemeral Blitz node ID.
+    Id(u64),
+    /// CSS selector string (e.g. "#test-input", "button.primary", "input[type='text']").
+    Selector(String),
+}
+
+impl std::fmt::Display for ElementTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Id(id) => write!(f, "#{id}"),
+            Self::Selector(sel) => write!(f, "{sel}"),
+        }
+    }
+}
+
+impl From<u64> for ElementTarget {
+    fn from(id: u64) -> Self {
+        Self::Id(id)
+    }
+}
+
+impl From<&str> for ElementTarget {
+    fn from(s: &str) -> Self {
+        let trimmed = s.trim();
+        if let Ok(id) = trimmed.parse::<u64>() {
+            Self::Id(id)
+        } else {
+            Self::Selector(trimmed.to_string())
+        }
+    }
+}
+
+impl From<String> for ElementTarget {
+    fn from(s: String) -> Self {
+        let trimmed = s.trim();
+        if let Ok(id) = trimmed.parse::<u64>() {
+            Self::Id(id)
+        } else {
+            Self::Selector(trimmed.to_string())
+        }
+    }
+}
+
 /// Request to inspect the running host's DOM / semantic tree.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,9 +91,28 @@ pub struct InspectRequest {
     /// Optional starting root node id. If `None`, inspection starts at document root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_node_id: Option<u64>,
+    /// Optional CSS selector to target the root node of the inspection subtree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// Optional polymorphic element target (node ID or CSS selector).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<ElementTarget>,
     /// Optional maximum traversal depth.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_depth: Option<u32>,
+}
+
+impl InspectRequest {
+    /// Resolves the intended target if specified either via `target`, `selector`, or `root_node_id`.
+    pub fn target(&self) -> Option<ElementTarget> {
+        if let Some(ref t) = self.target {
+            Some(t.clone())
+        } else if let Some(ref s) = self.selector {
+            Some(ElementTarget::from(s.as_str()))
+        } else {
+            self.root_node_id.map(ElementTarget::Id)
+        }
+    }
 }
 
 /// A node in the inspected semantic tree.
@@ -113,32 +179,50 @@ pub struct InspectResponse {
     pub viewport_scroll: Option<[f64; 2]>,
     /// Flattened pre-order list of semantic nodes.
     pub nodes: Vec<SemanticNode>,
+    /// Optional status or failure message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// Request to perform an action on a target node in the host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum ActionRequest {
-    /// Synthetic click on a node.
+    /// Synthetic click on a node or selector.
     Click {
         /// Optional target window handle (falls back to primary window if None).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_id: Option<u64>,
-        node_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
     },
-    /// Focus a target node.
+    /// Focus a target node or selector.
     Focus {
         /// Optional target window handle (falls back to primary window if None).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_id: Option<u64>,
-        node_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
     },
-    /// Set the text/input value of an editable node.
+    /// Set the text/input value of an editable node or selector.
     SetValue {
         /// Optional target window handle (falls back to primary window if None).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window_id: Option<u64>,
-        node_id: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         value: String,
     },
     /// Inject a keypress action.
@@ -149,6 +233,10 @@ pub enum ActionRequest {
         /// Optional target node handle (falls back to currently focused element or root if None).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         /// Key name or character to inject (e.g. "Tab", "Enter", "Space", "Backspace", "a").
         key: String,
         /// Modifier keys held during the keypress.
@@ -163,6 +251,10 @@ pub enum ActionRequest {
         /// Optional target node handle (its center is used if x/y are omitted).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         /// Explicit X coordinate in viewport CSS pixels.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<f32>,
@@ -181,6 +273,10 @@ pub enum ActionRequest {
         /// Optional target node handle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         /// Explicit X coordinate in viewport CSS pixels.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<f32>,
@@ -202,6 +298,10 @@ pub enum ActionRequest {
         /// Optional target node handle.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         /// Explicit X coordinate in viewport CSS pixels.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<f32>,
@@ -223,6 +323,10 @@ pub enum ActionRequest {
         /// Optional target node handle (its center is used if x/y are omitted).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
         /// Explicit X coordinate in viewport CSS pixels.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<f32>,
@@ -239,6 +343,58 @@ pub enum ActionRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         modifiers: Option<KeyModifiers>,
     },
+}
+
+impl ActionRequest {
+    /// Resolves the intended target if specified either via `target`, `selector`, or `node_id`.
+    pub fn target(&self) -> Option<ElementTarget> {
+        match self {
+            Self::Click { target, selector, node_id, .. }
+            | Self::Focus { target, selector, node_id, .. }
+            | Self::SetValue { target, selector, node_id, .. }
+            | Self::Key { target, selector, node_id, .. }
+            | Self::MouseMove { target, selector, node_id, .. }
+            | Self::MouseDown { target, selector, node_id, .. }
+            | Self::MouseUp { target, selector, node_id, .. }
+            | Self::Wheel { target, selector, node_id, .. } => {
+                if let Some(t) = target {
+                    Some(t.clone())
+                } else if let Some(s) = selector {
+                    Some(ElementTarget::from(s.as_str()))
+                } else {
+                    node_id.map(ElementTarget::Id)
+                }
+            }
+        }
+    }
+
+    /// Access raw `node_id` field if directly specified.
+    pub fn raw_node_id(&self) -> Option<u64> {
+        match self {
+            Self::Click { node_id, .. }
+            | Self::Focus { node_id, .. }
+            | Self::SetValue { node_id, .. }
+            | Self::Key { node_id, .. }
+            | Self::MouseMove { node_id, .. }
+            | Self::MouseDown { node_id, .. }
+            | Self::MouseUp { node_id, .. }
+            | Self::Wheel { node_id, .. } => *node_id,
+        }
+    }
+
+    /// Access raw `selector` field if directly specified.
+    pub fn raw_selector(&self) -> Option<&str> {
+        match self {
+            Self::Click { selector, .. }
+            | Self::Focus { selector, .. }
+            | Self::SetValue { selector, .. }
+            | Self::Key { selector, .. }
+            | Self::MouseMove { selector, .. }
+            | Self::MouseDown { selector, .. }
+            | Self::MouseUp { selector, .. }
+            | Self::Wheel { selector, .. } => selector.as_deref(),
+        }
+    }
 }
 
 /// Modifier keys held during a key action.
@@ -350,8 +506,27 @@ pub struct CaptureRequest {
     /// Optional target node handle (if specified, crops the capture to this node's visual bounds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<u64>,
+    /// Optional CSS selector to crop the capture to the matching element's visual bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    /// Optional polymorphic element target (node ID or CSS selector).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<ElementTarget>,
     /// Target file path where the captured image artifact must be written.
     pub output_path: String,
+}
+
+impl CaptureRequest {
+    /// Resolves the intended target if specified either via `target`, `selector`, or `node_id`.
+    pub fn target(&self) -> Option<ElementTarget> {
+        if let Some(ref t) = self.target {
+            Some(t.clone())
+        } else if let Some(ref s) = self.selector {
+            Some(ElementTarget::from(s.as_str()))
+        } else {
+            self.node_id.map(ElementTarget::Id)
+        }
+    }
 }
 
 /// Metadata result of capturing a visual screenshot to a file.
@@ -393,6 +568,18 @@ pub enum ControlRequest {
     Settle(SettleRequest),
     /// Capture a visual screenshot of the document/window.
     Capture(CaptureRequest),
+}
+
+impl ControlRequest {
+    /// Resolves the intended target if specified in the payload.
+    pub fn target(&self) -> Option<ElementTarget> {
+        match self {
+            Self::Inspect(req) => req.target(),
+            Self::Act(req) => req.target(),
+            Self::Capture(req) => req.target(),
+            Self::Settle(_) => None,
+        }
+    }
 }
 
 /// Top-level control response envelope sent back across the transport.
@@ -439,6 +626,8 @@ mod tests {
         let req = ControlRequest::Inspect(InspectRequest {
             window_id: None,
             root_node_id: Some(10),
+            selector: None,
+            target: None,
             max_depth: Some(5),
         });
 
@@ -470,25 +659,46 @@ mod tests {
             hover_node_id: Some(1),
             viewport_scroll: Some([0.0, 50.0]),
             nodes: vec![node],
+            message: None,
         });
 
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: ControlResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);
 
-        // Test Action roundtrip: Click
+        // Test Action roundtrip: Click (node_id)
         let act_req = ControlRequest::Act(ActionRequest::Click {
             window_id: None,
-            node_id: 42,
+            node_id: Some(42),
+            selector: None,
+            target: None,
         });
         let act_json = serde_json::to_string(&act_req).unwrap();
         let act_parsed: ControlRequest = serde_json::from_str(&act_json).unwrap();
         assert_eq!(act_req, act_parsed);
 
+        // Test Action roundtrip: Click (selector)
+        let sel_click_req = ControlRequest::Act(ActionRequest::Click {
+            window_id: None,
+            node_id: None,
+            selector: Some("#test-interaction-button".into()),
+            target: None,
+        });
+        let sel_click_json = serde_json::to_string(&sel_click_req).unwrap();
+        assert!(sel_click_json.contains("\"selector\":\"#test-interaction-button\""));
+        let sel_click_parsed: ControlRequest = serde_json::from_str(&sel_click_json).unwrap();
+        assert_eq!(sel_click_req, sel_click_parsed);
+        assert_eq!(
+            sel_click_req.target(),
+            Some(ElementTarget::Selector("#test-interaction-button".into()))
+        );
+
         // Test Action roundtrip: Focus
         let focus_req = ControlRequest::Act(ActionRequest::Focus {
             window_id: Some(10),
-            node_id: 42,
+            node_id: Some(42),
+            selector: None,
+            target: None,
         });
         let focus_json = serde_json::to_string(&focus_req).unwrap();
         assert!(focus_json.contains("\"action\":\"focus\""));
@@ -498,7 +708,9 @@ mod tests {
         // Test Action roundtrip: SetValue
         let set_value_req = ControlRequest::Act(ActionRequest::SetValue {
             window_id: None,
-            node_id: 42,
+            node_id: Some(42),
+            selector: None,
+            target: None,
             value: "Hello World".into(),
         });
         let set_value_json = serde_json::to_string(&set_value_req).unwrap();
@@ -506,6 +718,23 @@ mod tests {
         assert!(set_value_json.contains("\"value\":\"Hello World\""));
         let set_value_parsed: ControlRequest = serde_json::from_str(&set_value_json).unwrap();
         assert_eq!(set_value_req, set_value_parsed);
+
+        // Test InspectRequest with selector
+        let sel_inspect_req = ControlRequest::Inspect(InspectRequest {
+            window_id: None,
+            root_node_id: None,
+            selector: Some("#test-input".into()),
+            target: None,
+            max_depth: Some(3),
+        });
+        let sel_inspect_json = serde_json::to_string(&sel_inspect_req).unwrap();
+        assert!(sel_inspect_json.contains("\"selector\":\"#test-input\""));
+        let sel_inspect_parsed: ControlRequest = serde_json::from_str(&sel_inspect_json).unwrap();
+        assert_eq!(sel_inspect_req, sel_inspect_parsed);
+        assert_eq!(
+            sel_inspect_req.target(),
+            Some(ElementTarget::Selector("#test-input".into()))
+        );
 
         let act_resp = ControlResponse::ActionSuccess(ActionResponse {
             success: true,
@@ -538,6 +767,8 @@ mod tests {
         let cap_req = ControlRequest::Capture(CaptureRequest {
             window_id: Some(99),
             node_id: Some(42),
+            selector: None,
+            target: None,
             output_path: "target/test.png".into(),
         });
         let cap_req_json = serde_json::to_string(&cap_req).unwrap();
@@ -551,6 +782,8 @@ mod tests {
         let key_req = ControlRequest::Act(ActionRequest::Key {
             window_id: None,
             node_id: Some(101),
+            selector: None,
+            target: None,
             key: "Tab".into(),
             modifiers: Some(KeyModifiers::SHIFT),
         });
@@ -565,6 +798,8 @@ mod tests {
         let sentinel_req = ControlRequest::Act(ActionRequest::Key {
             window_id: None,
             node_id: None,
+            selector: None,
+            target: None,
             key: "a".into(),
             modifiers: Some(KeyModifiers::action_modifier()),
         });
@@ -576,6 +811,8 @@ mod tests {
         let move_req = ControlRequest::Act(ActionRequest::MouseMove {
             window_id: None,
             node_id: Some(102),
+            selector: None,
+            target: None,
             x: Some(150.0),
             y: Some(250.0),
             modifiers: None,
@@ -590,6 +827,8 @@ mod tests {
         let down_req = ControlRequest::Act(ActionRequest::MouseDown {
             window_id: None,
             node_id: Some(102),
+            selector: None,
+            target: None,
             x: None,
             y: None,
             button: Some("left".into()),
@@ -605,6 +844,8 @@ mod tests {
         let up_req = ControlRequest::Act(ActionRequest::MouseUp {
             window_id: None,
             node_id: Some(102),
+            selector: None,
+            target: None,
             x: None,
             y: None,
             button: Some("left".into()),
@@ -619,6 +860,8 @@ mod tests {
         let wheel_req = ControlRequest::Act(ActionRequest::Wheel {
             window_id: None,
             node_id: Some(103),
+            selector: None,
+            target: None,
             x: None,
             y: None,
             delta_x: 0.0,
@@ -639,6 +882,8 @@ mod tests {
             ControlRequest::Act(ActionRequest::Wheel {
                 window_id: None,
                 node_id: Some(103),
+                selector: None,
+                target: None,
                 x: None,
                 y: None,
                 delta_x: 10.0,

@@ -53,6 +53,7 @@ mod tests {
                             scroll_offset: None,
                             children: vec![],
                         }],
+                        message: None,
                     }));
                 }
                 other => panic!("Unexpected request: {other:?}"),
@@ -64,6 +65,8 @@ mod tests {
             .inspect(InspectRequest {
                 window_id: None,
                 root_node_id: Some(42),
+                selector: None,
+                target: None,
                 max_depth: None,
             })
             .expect("inspect must succeed");

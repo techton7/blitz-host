@@ -332,16 +332,15 @@ The blitz-host stack has proven and completed all planned MVP and core interacti
 6. **Full-Window Visual Capture**: Headless in-process Vello CPU scene rasterization to PNG bytes.
 7. **Subtree / Node-Level Visual Capture**: Crop-based capture of inspect-selected nodes to physical pixel bounds, returning node ID and cropped dimensions.
 8. **Oxidase Runtime Boundary Split**: Canonical `cross_host` example vs native runner harness.
+9. **CSS Selector Targeting via Stylo**: Full polymorphic selector targeting (`ElementTarget`) across `inspect`, `capture`, `focus`, `set-value`, `mouse *`, and `key` commands, resolving against live `BaseDocument::query_selector` on the UI thread without a scripting engine.
 
 ## Later expansion categories
 
-With the core interaction and visual proof lanes complete, later optional categories include:
+With the core interaction, visual proof, and selector targeting lanes complete, later optional categories include:
 
-After the two priorities above, later categories can include:
-
-1. richer diagnostics streams
-2. broader multi-window routing when the runtime genuinely needs it
-3. shared cross-host (`web`/`native`) scenario surfaces at the `oxidase` layer
+1. **Richer Diagnostics Streams**: Streaming event logs, paint boundaries, and VSync timeline telemetry over UDS.
+2. **Multi-Window Routing**: Explicit window handle selection when applications spawn secondary native windows.
+3. **Deferred Runtime Scripting**: Dynamic scripting (`eval`, `run`, embedded Rhai/JS engines) is explicitly deferred from `blitz-host`. If a shared scenario or test scripting layer is pursued later, it belongs at the `oxidase` cross-host layer as a unified abstraction driving both Web and Native targets.
 
 ## Security posture
 

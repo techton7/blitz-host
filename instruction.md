@@ -1,4 +1,4 @@
-# Worker Instruction: Finish the `capture` Simplification for Real (Remove Inline Base64 Completely)
+# Worker Instruction: Implement `querySelector`-Style Selector Targeting in `blitz-host` (Still No Rhai)
 
 You are working in:
 
@@ -6,13 +6,13 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The previous pass made capture green, but it did **not** fully satisfy the requested contract simplification.
+The direction is now fixed:
 
-The current problem is:
+> **`querySelector` / selector-based targeting should be implemented in `blitz-host` now**
 
-> **`data_base64` is still present in the protocol, bridge, client, tests, and result narrative**
+At the same time:
 
-This pass must remove that, not just hide it.
+> **runtime scripting (Rhai / eval / run / REPL) is still deferred and must not be implemented in this pass**
 
 Write all agent-facing reasoning in English.
 
@@ -29,127 +29,153 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Finish the `capture` contract simplification completely.
+Add selector-based targeting so that `blitz-host` users no longer need to depend only on ephemeral numeric `node_id`s for common workflows.
 
-The intended end-state is:
+The point is:
 
-1. `capture` always requires `-o/--output`
-2. the public JSON response is metadata-only
-3. inline base64 image payloads are removed from the supported contract entirely
+> **selector ergonomics now, scripting later**
 
-That means:
-
-> not just “CLI hides base64,” but “the contract no longer revolves around `data_base64`.”
+The selector work should meaningfully improve the current CLI/client surface without dragging in a scripting runtime.
 
 ---
 
-## 2. What Is Still Wrong
+## 2. Scope Boundary
 
-The previous state is insufficient because:
+### Must implement
 
-1. `CaptureResponse.data_base64` still exists
-2. bridge code still base64-encodes PNG bytes
-3. client helpers still decode `resp.data_base64`
-4. tests still assert on `data_base64.len()`
-5. result text still describes base64-based responses
+1. selector-based targeting in the protocol / bridge
+2. selector-based targeting in the client / CLI surface
+3. live proof that selectors resolve and actions operate on the resolved nodes
 
-That is not the requested simplified model.
+### Must not implement
+
+1. Rhai
+2. `eval`
+3. `run <file>`
+4. REPL / shell
+5. general-purpose scripting wrappers
+
+This is a selector ergonomics pass, not a scripting pass.
 
 ---
 
-## 3. Required Contract
+## 3. Suggested Targeting Model
 
-The public capture contract must become:
+Use a small polymorphic targeting model, for example:
 
-### CLI
+1. direct numeric node ID
+2. CSS selector string
+
+The exact type shape is up to you, but it should let a caller say either:
+
+1. “act on node `4294967402`”
+2. “act on `#submit-button`”
+
+without inventing a full scripting layer.
+
+Reasonable commands to support first:
+
+1. `inspect`
+2. `click`
+3. `focus`
+4. `set-value`
+5. `capture`
+
+You may decide whether keyboard/mouse actions should also accept selectors in the same pass if it stays coherent and does not sprawl.
+
+---
+
+## 4. Existing Engine Seam to Reuse
+
+You should first inspect and then reuse the native selector/query support that already exists in the current engine/runtime stack where possible.
+
+Do not re-implement a CSS selector engine from scratch.
+
+The purpose of this pass is to expose that power through `blitz-host`, not to recreate Stylo/DOM selector machinery.
+
+---
+
+## 5. CLI / UX Goal
+
+The ergonomic target is that users can write things like:
 
 ```bash
-blitz-host capture ... -o <FILE>
+blitz-host inspect "#test-input"
+blitz-host focus "#test-input"
+blitz-host set-value "#test-input" "hello"
+blitz-host mouse click "#submit-button"
+blitz-host capture "#mouse-test-card" -o target/card.png
 ```
 
-with:
+You do not need to implement every example above if one or two are enough to prove the model, but the direction should be that selector-based targeting is real and usable.
 
-1. required `-o/--output`
-2. metadata JSON on `stdout`
-3. actual image bytes written to the requested file path
-
-### Public JSON
-
-The returned JSON should describe the artifact, for example:
-
-1. `success`
-2. `filePath`
-3. `width`
-4. `height`
-5. `format`
-6. `nodeId`
-7. `bytes`
-8. `message`
-
-The actual PNG data should **not** be embedded in the JSON.
+Keep the visible CLI surface simple.
 
 ---
 
-## 4. Required Removal
+## 6. Proof Expectations
 
-Remove `data_base64` from the supported capture contract.
+The proof must show that selectors resolve on the live UI thread against the current live DOM/document, not against stale cached JSON.
 
-That means you must inspect and update all relevant layers:
+At minimum, prove:
 
-1. protocol types
-2. bridge response assembly
-3. client helpers
-4. CLI plumbing
-5. tests
-6. result/docs
+1. selector resolves to the expected live target
+2. action executes against that target
+3. the resulting state change is inspect-visible
 
-If internal code still needs raw bytes temporarily before writing the file, that is fine.
+Good proof cases:
 
-But the public response and public flow must no longer expose or rely on base64 image payloads.
+1. `#test-input`
+2. `#test-interaction-button`
+3. `#mouse-test-card`
 
----
+Do not stop at “selector parsed successfully.”
 
-## 5. What Not to Do
-
-1. do not merely stop printing base64 while keeping it as the hidden contract center
-2. do not leave legacy fields in types “just in case”
-3. do not weaken tests so the issue disappears without the contract actually changing
-
-This pass is about removing the old model, not cosmetically papering over it.
+The proof is successful selection **plus** successful action/outcome.
 
 ---
 
-## 6. Files / Areas to Reinspect
+## 7. What Not to Do
+
+1. do not add scripting
+2. do not implement a parallel selector engine if an existing seam is available
+3. do not over-expand the action matrix in the same pass
+4. do not make the new selector surface so magical that it becomes ambiguous or hard to debug
+
+This should still feel like a deterministic control plane.
+
+---
+
+## 8. Files / Areas to Reinspect
 
 At minimum:
 
-1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
+1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
 4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
+7. relevant Blitz / DOM selector APIs in the current engine stack
 
 ---
 
-## 7. Validation You Must Run
+## 9. Validation You Must Run
 
-Run the smallest commands that prove the simplified contract is real.
+Run the smallest commands that honestly prove selector targeting works.
 
 At minimum:
 
-1. rerun the `blitz-host` suite
-2. validate full-window capture with required `-o`
-3. validate node/subtree capture with required `-o`
-4. confirm metadata JSON no longer contains inline image payload
-5. confirm existing capture functionality still works
+1. protocol / transport tests for the new target representation
+2. any focused selector-resolution tests available or needed
+3. live native E2E proving selector-based targeting against a running host
+4. confirmation that existing node-id-based flows still work
 
 If markdown files are edited, validate them.
 
 ---
 
-## 8. `result.md` Requirement
+## 10. `result.md` Requirement
 
 Update:
 
@@ -157,22 +183,23 @@ Update:
 
 It must explicitly record:
 
-1. that `data_base64` was removed from the supported capture contract
-2. what the new metadata-only JSON looks like
-3. what internal flow now writes the artifact
-4. what validation proved the change
-5. what remains deferred
+1. what selector targeting surface was added
+2. what engine/runtime selector seam it reuses
+3. which commands now support selectors
+4. what live proof was observed
+5. that Rhai/runtime scripting remains deferred
+6. what remains unresolved
 
 ---
 
-## 9. Final Verdict Rule
+## 11. Final Verdict Rule
 
-You may report **Implemented and simplified** only if:
+You may report **Implemented and proven** only if:
 
-1. `data_base64` no longer exists as part of the supported public capture contract
-2. metadata JSON is the only stdout payload
-3. required `-o/--output` works for both full-window and node capture
-4. existing capture functionality still works
+1. selector-based targeting is real
+2. it works against the live current DOM, not cached prior inspect data
+3. at least one action/outcome flow is proven through selectors
+4. runtime scripting is still clearly out of scope in this pass
 
 Otherwise report:
 
@@ -182,4 +209,4 @@ or
 
 The purpose of this pass is:
 
-> finish the capture API simplification all the way, not halfway.
+> make `blitz-host` selector-ergonomic without turning it into a scripting platform.

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use blitz_host_protocol::{
     ActionRequest, ActionResponse, CaptureRequest, CaptureResponse, ControlRequest,
-    ControlResponse, HostDescriptor, InspectRequest, InspectResponse, KeyModifiers,
+    ControlResponse, ElementTarget, HostDescriptor, InspectRequest, InspectResponse, KeyModifiers,
     SettleRequest, SettleResponse,
 };
 
@@ -88,6 +88,33 @@ impl DebugClient {
         }
     }
 
+    /// Inspect a specific node and its subtree.
+    pub fn inspect_node(&mut self, node_id: u64) -> io::Result<InspectResponse> {
+        self.inspect(InspectRequest {
+            window_id: None,
+            root_node_id: Some(node_id),
+            selector: None,
+            target: Some(ElementTarget::Id(node_id)),
+            max_depth: None,
+        })
+    }
+
+    /// Inspect a specific target node or selector and its subtree.
+    pub fn inspect_target(&mut self, target: impl Into<ElementTarget>) -> io::Result<InspectResponse> {
+        let target = target.into();
+        let (root_node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        self.inspect(InspectRequest {
+            window_id: None,
+            root_node_id,
+            selector,
+            target: Some(target),
+            max_depth: None,
+        })
+    }
+
     /// Execute a UI action on the host.
     pub fn act(&mut self, action: ActionRequest) -> io::Result<ActionResponse> {
         match self.send_request(ControlRequest::Act(action))? {
@@ -106,7 +133,36 @@ impl DebugClient {
 
     /// Click on a specific node by ID on a targeted window (or primary fallback if None).
     pub fn click_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
-        self.act(ActionRequest::Click { window_id, node_id })
+        self.act(ActionRequest::Click {
+            window_id,
+            node_id: Some(node_id),
+            selector: None,
+            target: Some(ElementTarget::Id(node_id)),
+        })
+    }
+
+    /// Convenience helper to click on an element specified by node ID or CSS selector.
+    pub fn click_target(&mut self, target: impl Into<ElementTarget>) -> io::Result<ActionResponse> {
+        self.click_target_window(None, target)
+    }
+
+    /// Click on an element specified by node ID or CSS selector on a targeted window.
+    pub fn click_target_window(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+    ) -> io::Result<ActionResponse> {
+        let target = target.into();
+        let (node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        self.act(ActionRequest::Click {
+            window_id,
+            node_id,
+            selector,
+            target: Some(target),
+        })
     }
 
     /// Convenience helper to focus a specific node by ID on the default/fallback window.
@@ -116,7 +172,36 @@ impl DebugClient {
 
     /// Focus a specific node by ID on a targeted window (or primary fallback if None).
     pub fn focus_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
-        self.act(ActionRequest::Focus { window_id, node_id })
+        self.act(ActionRequest::Focus {
+            window_id,
+            node_id: Some(node_id),
+            selector: None,
+            target: Some(ElementTarget::Id(node_id)),
+        })
+    }
+
+    /// Convenience helper to focus an element specified by node ID or CSS selector.
+    pub fn focus_target(&mut self, target: impl Into<ElementTarget>) -> io::Result<ActionResponse> {
+        self.focus_target_window(None, target)
+    }
+
+    /// Focus an element specified by node ID or CSS selector on a targeted window.
+    pub fn focus_target_window(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+    ) -> io::Result<ActionResponse> {
+        let target = target.into();
+        let (node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        self.act(ActionRequest::Focus {
+            window_id,
+            node_id,
+            selector,
+            target: Some(target),
+        })
     }
 
     /// Convenience helper to set the value of an input node by ID on the default/fallback window.
@@ -133,8 +218,63 @@ impl DebugClient {
     ) -> io::Result<ActionResponse> {
         self.act(ActionRequest::SetValue {
             window_id,
-            node_id,
+            node_id: Some(node_id),
+            selector: None,
+            target: Some(ElementTarget::Id(node_id)),
             value: value.into(),
+        })
+    }
+
+    /// Convenience helper to set the value of an input specified by node ID or CSS selector.
+    pub fn set_value_target(
+        &mut self,
+        target: impl Into<ElementTarget>,
+        value: impl Into<String>,
+    ) -> io::Result<ActionResponse> {
+        self.set_value_target_window(None, target, value)
+    }
+
+    /// Set the value of an input specified by node ID or CSS selector on a targeted window.
+    pub fn set_value_target_window(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+        value: impl Into<String>,
+    ) -> io::Result<ActionResponse> {
+        let target = target.into();
+        let (node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        self.act(ActionRequest::SetValue {
+            window_id,
+            node_id,
+            selector,
+            target: Some(target),
+            value: value.into(),
+        })
+    }
+
+    /// Dispatch synthetic key event with optional modifiers to an optional targeted element.
+    pub fn key_target(
+        &mut self,
+        window_id: Option<u64>,
+        target: Option<ElementTarget>,
+        key: impl Into<String>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (node_id, selector) = match &target {
+            Some(ElementTarget::Id(id)) => (Some(*id), None),
+            Some(ElementTarget::Selector(sel)) => (None, Some(sel.clone())),
+            None => (None, None),
+        };
+        self.act(ActionRequest::Key {
+            window_id,
+            node_id,
+            selector,
+            target,
+            key: key.into(),
+            modifiers,
         })
     }
 
@@ -146,12 +286,7 @@ impl DebugClient {
         key: impl Into<String>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        self.act(ActionRequest::Key {
-            window_id,
-            node_id,
-            key: key.into(),
-            modifiers,
-        })
+        self.key_target(window_id, node_id.map(ElementTarget::Id), key, modifiers)
     }
 
     /// Dispatch synthetic key event to an optional targeted node.
@@ -204,6 +339,34 @@ impl DebugClient {
         self.key_with_modifiers(None, node_id, "a", Some(KeyModifiers::action_modifier()))
     }
 
+    /// Move pointer / mouse to a target element or specific coordinates with optional modifiers.
+    pub fn mouse_move_target(
+        &mut self,
+        window_id: Option<u64>,
+        target: Option<ElementTarget>,
+        coords: Option<(f32, f32)>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        let (node_id, selector) = match &target {
+            Some(ElementTarget::Id(id)) => (Some(*id), None),
+            Some(ElementTarget::Selector(sel)) => (None, Some(sel.clone())),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseMove {
+            window_id,
+            node_id,
+            selector,
+            target,
+            x,
+            y,
+            modifiers,
+        })
+    }
+
     /// Move pointer / mouse to a target node or specific coordinates with optional modifiers.
     pub fn mouse_move(
         &mut self,
@@ -212,17 +375,7 @@ impl DebugClient {
         coords: Option<(f32, f32)>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        let (x, y) = match coords {
-            Some((cx, cy)) => (Some(cx), Some(cy)),
-            None => (None, None),
-        };
-        self.act(ActionRequest::MouseMove {
-            window_id,
-            node_id,
-            x,
-            y,
-            modifiers,
-        })
+        self.mouse_move_target(window_id, node_id.map(ElementTarget::Id), coords, modifiers)
     }
 
     /// Hover over a target node on the primary window.
@@ -240,6 +393,36 @@ impl DebugClient {
         self.mouse_move(None, None, Some((x, y)), None)
     }
 
+    /// Press mouse button down on a target element or coordinates.
+    pub fn mouse_down_target(
+        &mut self,
+        window_id: Option<u64>,
+        target: Option<ElementTarget>,
+        coords: Option<(f32, f32)>,
+        button: Option<&str>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        let (node_id, selector) = match &target {
+            Some(ElementTarget::Id(id)) => (Some(*id), None),
+            Some(ElementTarget::Selector(sel)) => (None, Some(sel.clone())),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseDown {
+            window_id,
+            node_id,
+            selector,
+            target,
+            x,
+            y,
+            button: button.map(|s| s.to_string()),
+            modifiers,
+        })
+    }
+
     /// Press mouse button down on a target node or coordinates.
     pub fn mouse_down(
         &mut self,
@@ -249,13 +432,32 @@ impl DebugClient {
         button: Option<&str>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
+        self.mouse_down_target(window_id, node_id.map(ElementTarget::Id), coords, button, modifiers)
+    }
+
+    /// Release mouse button on a target element or coordinates.
+    pub fn mouse_up_target(
+        &mut self,
+        window_id: Option<u64>,
+        target: Option<ElementTarget>,
+        coords: Option<(f32, f32)>,
+        button: Option<&str>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
         let (x, y) = match coords {
             Some((cx, cy)) => (Some(cx), Some(cy)),
             None => (None, None),
         };
-        self.act(ActionRequest::MouseDown {
+        let (node_id, selector) = match &target {
+            Some(ElementTarget::Id(id)) => (Some(*id), None),
+            Some(ElementTarget::Selector(sel)) => (None, Some(sel.clone())),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseUp {
             window_id,
             node_id,
+            selector,
+            target,
             x,
             y,
             button: button.map(|s| s.to_string()),
@@ -272,26 +474,58 @@ impl DebugClient {
         button: Option<&str>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        let (x, y) = match coords {
-            Some((cx, cy)) => (Some(cx), Some(cy)),
-            None => (None, None),
-        };
-        self.act(ActionRequest::MouseUp {
-            window_id,
-            node_id,
-            x,
-            y,
-            button: button.map(|s| s.to_string()),
-            modifiers,
-        })
+        self.mouse_up_target(window_id, node_id.map(ElementTarget::Id), coords, button, modifiers)
+    }
+
+    /// Execute a drag sequence between two elements specified by ID or CSS selector.
+    pub fn drag_target(
+        &mut self,
+        from_target: impl Into<ElementTarget>,
+        to_target: impl Into<ElementTarget>,
+    ) -> io::Result<ActionResponse> {
+        let from = from_target.into();
+        let to = to_target.into();
+        self.mouse_move_target(None, Some(from.clone()), None, None)?;
+        self.mouse_down_target(None, Some(from), None, Some("left"), None)?;
+        self.mouse_move_target(None, Some(to.clone()), None, None)?;
+        self.mouse_up_target(None, Some(to), None, Some("left"), None)
     }
 
     /// Execute a drag sequence from `from_node_id` to `to_node_id` by composing move -> down -> move -> up.
     pub fn drag(&mut self, from_node_id: u64, to_node_id: u64) -> io::Result<ActionResponse> {
-        self.mouse_move(None, Some(from_node_id), None, None)?;
-        self.mouse_down(None, Some(from_node_id), None, Some("left"), None)?;
-        self.mouse_move(None, Some(to_node_id), None, None)?;
-        self.mouse_up(None, Some(to_node_id), None, Some("left"), None)
+        self.drag_target(ElementTarget::Id(from_node_id), ElementTarget::Id(to_node_id))
+    }
+
+    /// Dispatch mouse wheel / scroll event on a target element or coordinates.
+    pub fn wheel_target(
+        &mut self,
+        window_id: Option<u64>,
+        target: Option<ElementTarget>,
+        coords: Option<(f32, f32)>,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        let (node_id, selector) = match &target {
+            Some(ElementTarget::Id(id)) => (Some(*id), None),
+            Some(ElementTarget::Selector(sel)) => (None, Some(sel.clone())),
+            None => (None, None),
+        };
+        self.act(ActionRequest::Wheel {
+            window_id,
+            node_id,
+            selector,
+            target,
+            x,
+            y,
+            delta_x,
+            delta_y,
+            modifiers,
+        })
     }
 
     /// Dispatch mouse wheel / scroll event on a target node or coordinates.
@@ -304,19 +538,7 @@ impl DebugClient {
         delta_y: f64,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        let (x, y) = match coords {
-            Some((cx, cy)) => (Some(cx), Some(cy)),
-            None => (None, None),
-        };
-        self.act(ActionRequest::Wheel {
-            window_id,
-            node_id,
-            x,
-            y,
-            delta_x,
-            delta_y,
-            modifiers,
-        })
+        self.wheel_target(window_id, node_id.map(ElementTarget::Id), coords, delta_x, delta_y, modifiers)
     }
 
     /// Scroll a target node by vertical delta on the primary window.
@@ -380,6 +602,8 @@ impl DebugClient {
         self.capture_request(CaptureRequest {
             window_id,
             node_id: None,
+            selector: None,
+            target: None,
             output_path: resolved,
         })
     }
@@ -395,6 +619,39 @@ impl DebugClient {
         self.capture_request(CaptureRequest {
             window_id: None,
             node_id: Some(node_id),
+            selector: None,
+            target: Some(ElementTarget::Id(node_id)),
+            output_path: resolved,
+        })
+    }
+
+    /// Capture visual screenshot cropped to an element specified by node ID or CSS selector.
+    pub fn capture_target(
+        &mut self,
+        target: impl Into<ElementTarget>,
+        output_path: impl AsRef<Path>,
+    ) -> io::Result<CaptureResponse> {
+        self.capture_target_window(None, target, output_path)
+    }
+
+    /// Capture visual screenshot cropped to an element specified by node ID or CSS selector on a targeted window.
+    pub fn capture_target_window(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+        output_path: impl AsRef<Path>,
+    ) -> io::Result<CaptureResponse> {
+        let target = target.into();
+        let (node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        let resolved = Self::resolve_output_path(output_path);
+        self.capture_request(CaptureRequest {
+            window_id,
+            node_id,
+            selector,
+            target: Some(target),
             output_path: resolved,
         })
     }
@@ -411,6 +668,8 @@ impl DebugClient {
         self.capture_request(CaptureRequest {
             window_id,
             node_id,
+            selector: None,
+            target: node_id.map(ElementTarget::Id),
             output_path: resolved,
         })
     }
@@ -441,6 +700,24 @@ impl DebugClient {
             return Err(io::Error::other(
                 resp.message
                     .unwrap_or_else(|| format!("Capture of node #{node_id} failed without message")),
+            ));
+        }
+        Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
+    }
+
+    /// Capture visual screenshot of an element specified by node ID or CSS selector and write directly to `path`.
+    ///
+    /// Returns `(width, height, path)` on success.
+    pub fn capture_target_to_file(
+        &mut self,
+        target: impl Into<ElementTarget>,
+        path: impl AsRef<Path>,
+    ) -> io::Result<(u32, u32, PathBuf)> {
+        let resp = self.capture_target(target, &path)?;
+        if !resp.success {
+            return Err(io::Error::other(
+                resp.message
+                    .unwrap_or_else(|| "Capture of target failed without message".into()),
             ));
         }
         Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))

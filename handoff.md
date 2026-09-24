@@ -1,159 +1,96 @@
-# Architecture Spec & Handoff: `blitz-host` CLI Ergonomization & Deterministic JSON Protocol
+# Architecture Spec & Handoff: Control Plane Boundary — Native Selector Targeting & Deferred Runtime Scripting
 
-## 1. Summary
+## 1. Executive Summary & Confirmed Architectural Decision
 
-This specification establishes the canonical CLI design and UX improvements for `blitz-host`:
-1. **Always-On JSON Protocol**: Eliminates the `--json` flag; all subcommands return deterministic, machine-parseable JSON on `stdout`. Informational logs and status messages are directed to `stderr` or encapsulated within the JSON response envelope.
-2. **Compound Key Syntax (`key`)**: Eliminates separate modifier flags (`--shift`, `--ctrl`, `--alt`, `--meta`). Replaces them with intuitive compound key strings (e.g. `cmd+a`, `command+shift+z`, `shift+tab`, `ctrl+c`) with case-insensitive tokenization and normalization.
-3. **`mouse` Namespace Hierarchy**: Groups all pointer actions (`move`, `down`, `up`, `wheel`, `drag`) under the `blitz-host mouse` namespace, eliminating top-level namespace pollution while retaining backward-compatible aliases.
-4. **Hierarchical `--help` Documentation**: Introduces dedicated help manuals for the `mouse` namespace (`blitz-host mouse --help`) and updates all subcommand manuals to reflect compound keys and default JSON output.
+This document establishes the confirmed architectural boundary for `blitz-host` and clarifies the separation between **native control-plane primitives** and **runtime scripting**:
 
----
-
-## 2. Core Architecture Invariants
-
-### 1. Always-On JSON Output (`--json` Flag Elimination)
-- **Zero Ambiguity**: Subcommands never switch between human ASCII tables/trees and JSON based on an optional flag.
-- **Agent & Pipeline Native**: `stdout` is reserved strictly for valid JSON payloads. Tools like `jq`, AI agents, and CI pipelines can consume outputs directly without parsing errors.
-- **Diagnostic Hygiene**: Any diagnostic logs (such as connection banners, VSync settle notifications) MUST be routed to `stderr` via `eprintln!` so that `stdout` contains only the valid JSON response envelope.
-- **Unified JSON Response Envelopes**:
-  - `list`: JSON array of `HostDescriptor` objects `[ { "pid": ..., ... }, ... ]`.
-  - `inspect`: Pure `InspectResponse` JSON object.
-  - `capture`: Compact metadata JSON object with `filePath` and dimensions (no base64 in stdout; image bytes written directly to the mandatory `-o` path):
-    ```json
-    {
-      "success": true,
-      "filePath": "target/card.png",
-      "width": 618,
-      "height": 40,
-      "format": "png",
-      "nodeId": 4294967464,
-      "bytes": 7443
-    }
-    ```
-  - `click`, `focus`, `set-value`, `key`, `mouse *`: Pure `ActionResponse` JSON object:
-    ```json
-    {
-      "success": true,
-      "node_id": 4294967453,
-      "message": "Dispatched synthetic click to node #4294967453"
-    }
-    ```
-
-### 2. Compound Key Specification & Normalization (`key`)
-- **No Separate Modifier Flags**: Flags `--shift`, `--ctrl`, `--alt`, `--meta`, `--cmd` are removed from `blitz-host key`.
-- **Compound Delimiter**: Key expressions are split by `+` (e.g. `cmd+shift+a`, `"command+enter"`, `ctrl+v`, `alt+arrowup`).
-- **Case-Insensitive Modifier Matching**:
-  - `cmd`, `command`, `meta`, `super` -> `Modifiers::SUPER`
-  - `shift` -> `Modifiers::SHIFT`
-  - `ctrl`, `control` -> `Modifiers::CONTROL`
-  - `alt`, `option`, `opt` -> `Modifiers::ALT`
-- **Case-Insensitive Key Normalization**:
-  - Named navigation/action keys are parsed case-insensitively (`tab`, `enter`, `return`, `esc`, `escape`, `backspace`, `del`, `delete`, `space`, `arrowleft`, `left`, `arrowright`, `right`, `arrowup`, `up`, `arrowdown`, `down`).
-  - Single characters (`a`..`z`, `0`..`9`) are preserved with their character values and mapped to standard virtual keycodes.
-
-### 3. `mouse` Namespace Hierarchy
-- **Canonical Syntax**:
-  - `blitz-host mouse move [NODE_ID] [--x <X> --y <Y>] [--pid <PID>]`
-  - `blitz-host mouse down [NODE_ID] [--button <BUTTON>] [--x <X> --y <Y>] [--pid <PID>]`
-  - `blitz-host mouse up [NODE_ID] [--button <BUTTON>] [--x <X> --y <Y>] [--pid <PID>]`
-  - `blitz-host mouse wheel [NODE_ID] --dy <DY> [--dx <DX>] [--pid <PID>]`
-  - `blitz-host mouse drag <FROM_ID> <TO_ID> [--pid <PID>]`
-- **Top-Level Cleanliness**: Top-level `blitz-host --help` lists `mouse` as a compound namespace rather than 5 separate mouse commands.
-- **Backward Compatibility**: Direct calls to `blitz-host move`, `down`, `up`, `wheel`, `drag` remain supported as aliases to prevent breaking existing scripts.
-
-### 4. Hierarchical Help (`--help` / `-h`)
-- Running `blitz-host mouse --help` or `blitz-host mouse -h` displays the consolidated manual for all mouse capabilities.
-- Running `blitz-host mouse <subcommand> --help` displays the subcommand-specific manual.
-- Subcommand manuals reflect the removal of `--json` and the updated compound key syntax.
+1. **`blitz-host` Remains Focused on Native Primitives**:
+   - `blitz-host` continues to serve exclusively as the local, out-of-process control plane and inspection harness for live Blitz windows (inspect, action dispatch, deterministic frame settlement, visual capture, and targeting).
+2. **CSS Selector Targeting is Implemented and Proven**:
+   - Selector-based targeting (`querySelector` backed by the native Stylo engine in `blitz_dom::BaseDocument`) is now fully implemented and verified across the protocol, bridge, client API, and CLI.
+   - Callers can target elements using standard CSS selectors (e.g. `"#test-input"`, `"#submit-btn"`, `".todo-card"`) or direct numeric node IDs (`4294967402`).
+   - Resolution executes on the live UI thread immediately before action dispatch, guaranteeing that actions operate on current live DOM state.
+3. **Runtime Scripting Inside `blitz-host` Remains Deferred**:
+   - Embedding a dynamic scripting engine (such as Rhai, Boa, or equivalent), adding `eval` / `run` subcommands, or implementing in-process DOM scripting wrappers inside `blitz-host` is **strictly deferred**.
+   - `blitz-host` will not ship an embedded runtime scripting layer.
+4. **Future Shared Scripting / Scenario Layer Belongs at `oxidase`**:
+   - If a shared automation, E2E test runner, or declarative scenario scripting language is pursued in the future, it belongs at the **`oxidase` layer** as a cross-host abstraction.
+   - At the `oxidase` level, a scenario runner can drive both the **Web backend** (via browser automation / WebDriver) and the **Native backend** (via `blitz-host` typed IPC) using unified test intent.
 
 ---
 
-## 3. Canonical Public CLI Surface
+## 2. Architectural Boundary Analysis
 
-### Top-Level Overview (`blitz-host --help`)
+### 2.1 The Role of `blitz-host`: Native Control Driver
+`blitz-host` is designed as the native counterpart to the Chrome DevTools Protocol (CDP) or native WebDriver server. Its responsibilities are:
+- Local Unix Domain Socket (UDS) transport and discovery (`~/.blitz-host/`).
+- Main UI-thread synchronization and deterministic VSync frame settlement (`settle(n)`).
+- Direct traversal of `blitz_dom::BaseDocument` for layout-measured semantic DOM inspection.
+- Native CSS selector resolution via `blitz_dom::BaseDocument::query_selector` (Stylo) with bare ID fallback.
+- Dispatching synthetic input events (`MouseEvent`, `KeyboardEvent`, `FocusEvent`) into `dioxus-native-dom`.
+- High-fidelity visual rasterization and node crop capture to disk.
+
+Embedding a scripting language (like Rhai) directly into `blitz-host` would create an architectural mismatch:
+- It couples a specific scripting language into the low-level native driver.
+- It fails to solve cross-platform verification, because the same script would not run against the Web target.
+- It expands the attack surface and complexity of the native host bridge unnecessarily.
+
+### 2.2 The Role of `oxidase`: Cross-Host Scenario Orchestration
+`oxidase` is the cross-host application framework whose core mission is code and behavior parity across Web and Native (`crates/oxidase/examples/cross_host/`).
+
+If an automation scripting language or high-level test scenario runner is built:
 ```text
-blitz-host: Out-of-process control plane for live Blitz desktop applications.
-
-USAGE:
-    blitz-host <SUBCOMMAND>
-
-SUBCOMMANDS:
-    list [OPTIONS]                 List active, reachable Blitz desktop host processes (JSON)
-    inspect [OPTIONS]              Inspect live window semantic DOM & layout tree (JSON)
-    capture [NODE_ID] -o <PATH>    Capture live visual screenshot or node crop (mandatory -o, JSON)
-    click <NODE_ID> [OPTIONS]      Dispatch synthetic click to element (auto-settles, JSON)
-    focus <NODE_ID> [OPTIONS]      Focus target element (auto-settles, JSON)
-    set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles, JSON)
-    key <KEY_SPEC> [OPTIONS]       Dispatch key event (e.g. cmd+a, shift+tab, enter) (JSON)
-    mouse <SUBCOMMAND> [OPTIONS]   Pointer and mouse interactions (move, down, up, wheel, drag)
-
-OPTIONS:
-    -h, --help                     Print help information
-    -V, --version                  Print version information
+┌────────────────────────────────────────────────────────┐
+│              oxidase Scenario Runner                   │
+│        (Shared Test Scenarios / Rhai / E2E)            │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+             ┌─────────────┴─────────────┐
+             ▼                           ▼
+   ┌───────────────────┐       ┌───────────────────┐
+   │    Web Driver     │       │    blitz-host     │
+   │ (Playwright / CDP)│       │ (Native UDS IPC)  │
+   └───────────────────┘       └───────────────────┘
 ```
-
-### `key` Subcommand Syntax
-```bash
-# Activation & navigation
-blitz-host key enter
-blitz-host key tab
-blitz-host key shift+tab
-blitz-host key escape
-
-# Editing & Shortcuts
-blitz-host key cmd+a
-blitz-host key command+shift+z
-blitz-host key ctrl+c
-blitz-host key backspace --node 4294967405
-```
-
-### `mouse` Namespace Syntax
-```bash
-# Namespace help
-blitz-host mouse --help
-
-# Pointer actions
-blitz-host mouse move 4294967464
-blitz-host mouse move --x 150 --y 200
-blitz-host mouse down 4294967464 --button right
-blitz-host mouse up 4294967464
-blitz-host mouse wheel 4294967473 --dy 50
-blitz-host mouse drag 4294967464 4294967449
-```
+- A test scenario defined at the `oxidase` layer can execute identical assertions against both Web and Native builds.
+- On the Web side, `oxidase` delegates to standard browser drivers (Playwright / CDP).
+- On the Native side, `oxidase` issues typed IPC commands to `blitz-host`.
+- This preserves `blitz-host` as a clean, lean native driver while delivering cross-host test automation.
 
 ---
 
-## 4. Implementation Inventory
+## 3. Disentangling Selector Ergonomics from Scripting
 
-1. **`crates/blitz-host/src/bin/blitz-host.rs`**:
-   - Update `print_main_help`: list `mouse` namespace, remove top-level clutter.
-   - Add `print_mouse_namespace_help`: consolidated guide for `move`, `down`, `up`, `wheel`, `drag`.
-   - Update `print_key_help`: document compound key syntax (`cmd+a`, `command+shift+z`).
-   - Remove `--json` flags across all subcommand parsers; make JSON output unconditional on `stdout`.
-   - Re-route interactive diagnostic messages (`Connecting...`, `Synchronizing frames...`) to `eprintln!`.
-   - Implement `mouse` subcommand dispatcher routing to `move`, `down`, `up`, `wheel`, `drag`.
-   - Retain top-level match arms for `move`, `down`, `up`, `wheel`, `drag` as aliases.
-2. **`crates/blitz-host-protocol` / `blitz/packages/dioxus-native-dom/src/events.rs`**:
-   - Enhance `parse_key_str` to support `command`, `cmd`, `super`, `meta`, `ctrl`, `shift`, `alt`, `opt` case-insensitively.
-   - Add case-insensitive normalization for named keys (`tab`, `enter`, `escape`, `backspace`, `delete`, `space`, `arrow*`).
+The selector targeting milestone was completed without introducing a dynamic scripting engine.
+
+### Completed Selector Targeting Architecture:
+- **Polymorphic Target Parameter (`ElementTarget`)**: All targeting commands accept either numeric node IDs or CSS selector strings.
+- **Direct Stylo Resolution**: Reuses `blitz_dom::BaseDocument::query_selector` directly inside `blitz-host-bridge` on the live UI thread immediately before action dispatch.
+- **Pure Native Primitive**: Requires no scripting engine, no `eval`, and no dynamic runtime—it resolves an element against the live document before dispatching the existing typed `ActionRequest`.
+
+### What Remains Strictly Deferred:
+- In-process scripting engines (Rhai, Boa, QuickJS).
+- Dynamic code evaluation (`blitz-host eval "<code...>"`).
+- Script file execution (`blitz-host run <file.rhai>`).
+- Scripting DOM object models and method bindings (`Element.prototype.click()`).
+- REPL / interactive shell sessions.
 
 ---
 
-## 5. Verification & Proof Path
+## 4. Current Established State of `blitz-host`
 
-1. **Compilation & Clippy**:
-   ```bash
-   cargo check --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml
-   ```
-2. **CLI Output Determinism**:
-   - `blitz-host list` produces valid JSON parseable by `jq`.
-   - `blitz-host inspect` produces valid JSON parseable by `jq`.
-   - `blitz-host key "cmd+a"` dispatches with `Modifiers::SUPER` and key `'a'`.
-   - `blitz-host key "shift+tab"` traverses focus backwards.
-   - `blitz-host mouse move 4294967464` triggers hover via namespace.
-   - `blitz-host mouse --help` displays clean namespace documentation.
-3. **Automated Rust Test Suite**:
-   ```bash
-   cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture
-   ```
+The active `blitz-host` implementation is complete, stable, and 100% verified across all core interaction lanes:
+1. **Always-On JSON Protocol**: All subcommands unconditionally output machine-parseable JSON on `stdout`. Diagnostic messages route to `stderr`.
+2. **Strict `mouse` Namespace Hierarchy**: All pointer actions (`click`, `move`, `down`, `up`, `wheel`, `drag`) live strictly under `blitz-host mouse`. Top-level pointer aliases are rejected with exit code `1` (Zero Fallback).
+3. **Capture Simplification**: Mandatory `-o <PATH>` for visual capture, writing PNG bytes directly to disk and outputting compact metadata-only JSON (zero base64 in the wire protocol).
+4. **Symmetrical `[TARGET]` Targeting**: `blitz-host inspect [TARGET]` allows full-window or scoped subtree inspection by numeric node ID or CSS selector.
+5. **Compound Key Syntax**: `blitz-host key cmd+a`, `command+shift+z`, `shift+tab` with case-insensitive tokenization.
+6. **Live CSS Selector Targeting**: `blitz-host mouse click "#btn"`, `focus "#input"`, `set-value "#input" "val"`, `capture "#card" -o file.png`, `inspect "#card"` all resolve dynamically on the UI thread.
+
+---
+
+## 5. Next Steps & Implementation Directives
+
+1. **Do not implement Rhai or any runtime scripting engine in `blitz-host`**.
+2. Keep `blitz-host` focused on primitive stability, transport reliability, and deterministic native verification.
+3. Anchor any future programmable scenario / scripting design discussions at the `oxidase` workspace layer.

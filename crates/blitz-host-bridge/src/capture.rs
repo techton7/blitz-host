@@ -123,8 +123,31 @@ pub fn capture_document_node_png(
 
 /// Capture visual screenshot of `doc` and write directly to `request.output_path`.
 pub fn capture_document(doc: &mut BaseDocument, request: CaptureRequest) -> CaptureResponse {
-    let target_node_id = request.node_id;
+    let target = request.target();
+    let node_id = request.node_id;
+    let selector = request.selector;
     let output_path = request.output_path;
+
+    let target_node_id = match crate::target::resolve_target_in_doc(
+        doc,
+        target.as_ref(),
+        node_id,
+        selector.as_deref(),
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            return CaptureResponse {
+                success: false,
+                file_path: output_path,
+                width: 0,
+                height: 0,
+                format: "png".to_string(),
+                node_id: None,
+                bytes: 0,
+                message: Some(err),
+            };
+        }
+    };
 
     match capture_document_node_png(doc, target_node_id) {
         Ok((width, height, node_id, png_bytes)) => {

@@ -6,10 +6,12 @@
 pub mod bridge;
 pub mod capture;
 pub mod inspect;
+pub mod target;
 
 pub use bridge::HostBridge;
 pub use capture::{capture_document, capture_document_node_png, capture_document_png};
 pub use inspect::inspect_document;
+pub use target::resolve_target_in_doc;
 
 #[cfg(test)]
 mod tests {
@@ -45,7 +47,9 @@ mod tests {
         tx.send(ControlBridgeRequest {
             request: ControlRequest::Act(ActionRequest::Focus {
                 window_id: None,
-                node_id: root_id.as_u64(),
+                node_id: Some(root_id.as_u64()),
+                selector: None,
+                target: None,
             }),
             reply: focus_resp_tx,
         }).unwrap();
@@ -53,10 +57,11 @@ mod tests {
         let serviced = bridge.poll_and_service_with(&mut doc, 1, |act, d| {
             match act {
                 ActionRequest::Focus { node_id, .. } => {
-                    d.set_focus_to(blitz_dom::NodeId::from_u64(*node_id));
+                    let nid = node_id.unwrap();
+                    d.set_focus_to(blitz_dom::NodeId::from_u64(nid));
                     Ok(blitz_host_protocol::ActionResponse {
                         success: true,
-                        node_id: *node_id,
+                        node_id: nid,
                         message: Some("focused".into()),
                     })
                 }
@@ -99,6 +104,8 @@ mod tests {
             request: ControlRequest::Capture(CaptureRequest {
                 window_id: None,
                 node_id: None,
+                selector: None,
+                target: None,
                 output_path: test_output_file.to_string(),
             }),
             reply: cap_resp_tx,
@@ -131,6 +138,8 @@ mod tests {
             request: ControlRequest::Capture(CaptureRequest {
                 window_id: None,
                 node_id: Some(999999),
+                selector: None,
+                target: None,
                 output_path: "target/test_bridge_nonexistent.png".to_string(),
             }),
             reply: node_resp_tx,

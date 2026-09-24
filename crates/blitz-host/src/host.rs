@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use blitz_dom::BaseDocument;
-use blitz_host_bridge::HostBridge;
+use blitz_host_bridge::{resolve_target_in_doc, HostBridge};
 use blitz_host_protocol::{ActionRequest, ActionResponse, HostDescriptor};
 use blitz_host_transport::DebugServer;
 
@@ -180,42 +180,55 @@ impl HostControl {
         MU: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<&str>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
         W: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, f64, f64, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
     {
+        let resolved_target = resolve_target_in_doc(
+            base_doc,
+            action_req.target().as_ref(),
+            action_req.raw_node_id(),
+            action_req.raw_selector(),
+        )?;
+
         match action_req {
-            ActionRequest::Click { node_id, .. } => {
-                if click_fn(base_doc, *node_id) {
+            ActionRequest::Click { .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "Click requires a target node or selector".to_string())?;
+                if click_fn(base_doc, node_id) {
                     Ok(ActionResponse {
                         success: true,
-                        node_id: *node_id,
+                        node_id,
                         message: Some(format!("Dispatched synthetic click to node #{node_id}")),
                     })
                 } else {
                     Err(format!("Node #{node_id} or active listener not found in document"))
                 }
             }
-            ActionRequest::Focus { node_id, .. } => {
-                if focus_fn(base_doc, *node_id) {
+            ActionRequest::Focus { .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "Focus requires a target node or selector".to_string())?;
+                if focus_fn(base_doc, node_id) {
                     Ok(ActionResponse {
                         success: true,
-                        node_id: *node_id,
+                        node_id,
                         message: Some(format!("Dispatched synthetic focus to node #{node_id}")),
                     })
                 } else {
                     Err(format!("Node #{node_id} not found or not focusable"))
                 }
             }
-            ActionRequest::SetValue { node_id, value, .. } => {
-                if set_value_fn(base_doc, *node_id, value) {
+            ActionRequest::SetValue { value, .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "SetValue requires a target node or selector".to_string())?;
+                if set_value_fn(base_doc, node_id, value) {
                     Ok(ActionResponse {
                         success: true,
-                        node_id: *node_id,
+                        node_id,
                         message: Some(format!("Set value on node #{node_id}")),
                     })
                 } else {
                     Err(format!("Node #{node_id} not found or not an editable target"))
                 }
             }
-            ActionRequest::Key { node_id, key, modifiers, .. } => {
-                match key_fn(base_doc, *node_id, key, *modifiers) {
+            ActionRequest::Key { key, modifiers, .. } => {
+                match key_fn(base_doc, resolved_target, key, *modifiers) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
@@ -224,12 +237,12 @@ impl HostControl {
                     Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
                 }
             }
-            ActionRequest::MouseMove { node_id, x, y, modifiers, .. } => {
+            ActionRequest::MouseMove { x, y, modifiers, .. } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match mouse_move_fn(base_doc, *node_id, coords, *modifiers) {
+                match mouse_move_fn(base_doc, resolved_target, coords, *modifiers) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
@@ -238,12 +251,12 @@ impl HostControl {
                     Err(e) => Err(format!("Failed to dispatch mouse move: {e}")),
                 }
             }
-            ActionRequest::MouseDown { node_id, x, y, button, modifiers, .. } => {
+            ActionRequest::MouseDown { x, y, button, modifiers, .. } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match mouse_down_fn(base_doc, *node_id, coords, button.as_deref(), *modifiers) {
+                match mouse_down_fn(base_doc, resolved_target, coords, button.as_deref(), *modifiers) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
@@ -252,12 +265,12 @@ impl HostControl {
                     Err(e) => Err(format!("Failed to dispatch mouse down: {e}")),
                 }
             }
-            ActionRequest::MouseUp { node_id, x, y, button, modifiers, .. } => {
+            ActionRequest::MouseUp { x, y, button, modifiers, .. } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match mouse_up_fn(base_doc, *node_id, coords, button.as_deref(), *modifiers) {
+                match mouse_up_fn(base_doc, resolved_target, coords, button.as_deref(), *modifiers) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
@@ -266,12 +279,12 @@ impl HostControl {
                     Err(e) => Err(format!("Failed to dispatch mouse up: {e}")),
                 }
             }
-            ActionRequest::Wheel { node_id, x, y, delta_x, delta_y, modifiers, .. } => {
+            ActionRequest::Wheel { x, y, delta_x, delta_y, modifiers, .. } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match wheel_fn(base_doc, *node_id, coords, *delta_x, *delta_y, *modifiers) {
+                match wheel_fn(base_doc, resolved_target, coords, *delta_x, *delta_y, *modifiers) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
@@ -295,11 +308,19 @@ impl HostControl {
         F: FnMut(&BaseDocument, u64) -> bool,
     {
         match action_req {
-            ActionRequest::Click { node_id, .. } => {
-                if click_fn(base_doc, *node_id) {
+            ActionRequest::Click { .. } => {
+                let resolved = resolve_target_in_doc(
+                    base_doc,
+                    action_req.target().as_ref(),
+                    action_req.raw_node_id(),
+                    action_req.raw_selector(),
+                )?;
+                let node_id = resolved
+                    .ok_or_else(|| "Click requires a target node or selector".to_string())?;
+                if click_fn(base_doc, node_id) {
                     Ok(ActionResponse {
                         success: true,
-                        node_id: *node_id,
+                        node_id,
                         message: Some(format!("Dispatched synthetic click to node #{node_id}")),
                     })
                 } else {

@@ -6,24 +6,27 @@
 use std::path::PathBuf;
 
 use blitz_host::client::{DebugClient, TargetSelector};
-use blitz_host::protocol::{InspectRequest, KeyModifiers};
+use blitz_host::protocol::{ElementTarget, InspectRequest, KeyModifiers};
 
 fn print_main_help() {
     println!(
-        r#"blitz-host: Out-of-process control plane for live Blitz desktop applications.
+        r##"blitz-host: Out-of-process control plane for live Blitz desktop applications.
 
 USAGE:
     blitz-host <SUBCOMMAND>
 
 SUBCOMMANDS:
     list [OPTIONS]                 List active, reachable Blitz desktop host processes (JSON)
-    inspect [OPTIONS]              Inspect live window semantic DOM & layout tree (JSON)
-    capture [NODE_ID] -o <FILE>    Capture live visual screenshot or node crop (mandatory -o, JSON)
-    click <NODE_ID> [OPTIONS]      Dispatch synthetic click to element (auto-settles, JSON)
-    focus <NODE_ID> [OPTIONS]      Focus target element (auto-settles, JSON)
-    set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles, JSON)
+    inspect [TARGET] [OPTIONS]     Inspect live window semantic DOM & layout tree (JSON)
+    capture [TARGET] -o <FILE>     Capture live visual screenshot or node crop (mandatory -o, JSON)
+    focus <TARGET> [OPTIONS]       Focus target element (auto-settles, JSON)
+    set-value <TARGET> <VALUE>     Set text value of an input element (auto-settles, JSON)
     key <KEY_SPEC> [OPTIONS]       Dispatch key event (e.g. cmd+a, shift+tab, enter) (JSON)
-    mouse <SUBCOMMAND> [OPTIONS]   Pointer and mouse interactions (move, down, up, wheel, drag) (JSON)
+    mouse <SUBCOMMAND> [OPTIONS]   Pointer and mouse interactions (click, move, down, up, wheel, drag) (JSON)
+
+ARGUMENTS:
+    [TARGET]                       Target element specified by numeric node ID or CSS selector
+                                   (e.g. 4294967402, "#test-input", "button.primary")
 
 OPTIONS:
     -h, --help                     Print help information
@@ -37,45 +40,50 @@ EXAMPLES:
 
     # 2. Inspect the live DOM and layout tree (always JSON)
     blitz-host inspect
+    blitz-host inspect 4294967464
+    blitz-host inspect "#test-input"
     blitz-host inspect --pid 37462
 
     # 3. Capture visual screenshot to required output path
     blitz-host capture -o target/screenshot.png
     blitz-host capture 4294967464 -o target/card.png
+    blitz-host capture "#mouse-test-card" -o target/card.png
 
-    # 4. Click, focus, and set value
-    blitz-host click 4294967402
-    blitz-host focus 4294967405
-    blitz-host set-value 4294967405 "Hello Blitz"
+    # 4. Focus, and set value using selectors or IDs
+    blitz-host focus "#test-input"
+    blitz-host set-value "#test-input" "Hello Blitz"
 
     # 5. Keyboard shortcuts with compound expressions
     blitz-host key enter
     blitz-host key cmd+a
     blitz-host key command+shift+z
 
-    # 6. Mouse interactions via mouse namespace
-    blitz-host mouse move 4294967464
-    blitz-host mouse wheel 4294967473 --dy 50
-    blitz-host mouse drag 4294967464 4294967449
-"#
+    # 6. Mouse interactions via mouse namespace using selectors or IDs
+    blitz-host mouse click "#test-interaction-button"
+    blitz-host mouse move "#mouse-test-card"
+    blitz-host mouse wheel "#test-scroll-container" --dy 50
+    blitz-host mouse drag "#mouse-test-card" "#test-input"
+"##
     );
 }
 
 fn print_capture_help() {
     println!(
-        r#"blitz-host-capture: Capture live rendered visual screenshot (PNG).
+        r##"blitz-host-capture: Capture live rendered visual screenshot (PNG).
 
 USAGE:
-    blitz-host capture [NODE_ID] -o <PATH> [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host capture [TARGET] -o <PATH> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    [NODE_ID]            Optional target node ID to crop capture to its visual bounds.
+    [TARGET]             Optional target element specified by numeric node ID or CSS selector
+                         to crop capture to its visual bounds (e.g. 4294967464, "#mouse-test-card").
     [DESCRIPTOR_PATH]    Path to host descriptor JSON file or UDS socket.
                          If omitted, auto-discovers the active running Blitz window.
 
 OPTIONS:
     -o, --output <PATH>  Output PNG file path (REQUIRED)
-    --node, -n <NODE_ID> Target specific node/subtree to crop capture
+    --node, -n <NODE_ID> Target specific node/subtree by ID to crop capture
+    --selector, -s <SEL> Target specific node/subtree by CSS selector to crop capture
         --pid <PID>      Target specific host process by OS process ID
         --window <ID>    Target specific window ID (optional, defaults to primary window)
     -h, --help           Print help information
@@ -96,18 +104,20 @@ EXAMPLES:
     # 1. Capture full window screenshot to specified file
     blitz-host capture -o target/full_window.png
 
-    # 2. Capture specific element/subtree cropped to its bounds
+    # 2. Capture specific element/subtree cropped to its bounds via ID or selector
     blitz-host capture 4294967464 -o target/card.png
+    blitz-host capture "#mouse-test-card" -o target/card.png
+    blitz-host capture --selector "#mouse-test-card" -o target/card.png
 
     # 3. Target specific process ID
-    blitz-host capture 4294967464 -o target/card.png --pid 37462
-"#
+    blitz-host capture "#mouse-test-card" -o target/card.png --pid 37462
+"##
     );
 }
 
 fn print_list_help() {
     println!(
-        r#"blitz-host-list: List active, reachable Blitz desktop host processes.
+        r##"blitz-host-list: List active, reachable Blitz desktop host processes.
 
 USAGE:
     blitz-host list [OPTIONS]
@@ -120,22 +130,26 @@ OUTPUT:
 
 EXAMPLES:
     blitz-host list
-"#
+"##
     );
 }
 
 fn print_inspect_help() {
     println!(
-        r#"blitz-host-inspect: Inspect live Blitz window semantic DOM and layout tree.
+        r##"blitz-host-inspect: Inspect live Blitz window semantic DOM and layout tree.
 
 USAGE:
-    blitz-host inspect [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host inspect [TARGET] [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
+    [TARGET]                 Optional root element specified by numeric node ID or CSS selector
+                             to inspect only a specific subtree (e.g. 4294967464, "#test-input").
     [DESCRIPTOR_PATH]        Path to host descriptor JSON file or UDS socket.
                              If omitted, auto-discovers the active running Blitz window.
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific root node/subtree ID
+    --selector, -s <SEL>     Target specific root element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
         --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
@@ -145,23 +159,29 @@ OUTPUT:
 
 EXAMPLES:
     blitz-host inspect
+    blitz-host inspect 4294967464
+    blitz-host inspect "#test-input"
+    blitz-host inspect --selector "#test-input"
     blitz-host inspect --pid 37462
-"#
+"##
     );
 }
 
 fn print_click_help() {
     println!(
-        r#"blitz-host-click: Dispatch synthetic click to a live Blitz window element.
+        r##"blitz-host-mouse-click: Dispatch synthetic click to a live Blitz window element.
 
 USAGE:
-    blitz-host click <NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse click <TARGET> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    <NODE_ID>                Target node integer ID to click (e.g. 4294967402)
+    <TARGET>                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967402, "#test-interaction-button")
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
         --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
@@ -172,24 +192,28 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
-    blitz-host click 4294967402
-    blitz-host click 4294967402 --pid 37462
-"#
+    blitz-host mouse click 4294967402
+    blitz-host mouse click "#test-interaction-button"
+    blitz-host mouse click --selector "#test-interaction-button" --pid 37462
+"##
     );
 }
 
 fn print_focus_help() {
     println!(
-        r#"blitz-host-focus: Focus a target node in a live Blitz window.
+        r##"blitz-host-focus: Focus a target element in a live Blitz window.
 
 USAGE:
-    blitz-host focus <NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host focus <TARGET> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    <NODE_ID>                Target node integer ID to focus (e.g. 4294967405)
+    <TARGET>                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967405, "#test-input")
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
         --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
@@ -201,24 +225,28 @@ NOTE:
 
 EXAMPLES:
     blitz-host focus 4294967405
-    blitz-host focus 4294967405 --pid 37462
-"#
+    blitz-host focus "#test-input"
+    blitz-host focus --selector "#test-input" --pid 37462
+"##
     );
 }
 
 fn print_set_value_help() {
     println!(
-        r#"blitz-host-set-value: Set text value on an input element in a live Blitz window.
+        r##"blitz-host-set-value: Set text value on an input element in a live Blitz window.
 
 USAGE:
-    blitz-host set-value <NODE_ID> <VALUE> [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host set-value <TARGET> <VALUE> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    <NODE_ID>                Target node integer ID of input element (e.g. 4294967405)
+    <TARGET>                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967405, "#test-input")
     <VALUE>                  Text string to inject into the input element
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
         --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
@@ -230,14 +258,15 @@ NOTE:
 
 EXAMPLES:
     blitz-host set-value 4294967405 "Hello Blitz"
-    blitz-host set-value 4294967405 "Hello Blitz" --pid 37462
-"#
+    blitz-host set-value "#test-input" "Hello Blitz"
+    blitz-host set-value --selector "#test-input" "Hello Blitz" --pid 37462
+"##
     );
 }
 
 fn print_key_help() {
     println!(
-        r#"blitz-host-key: Dispatch a synthetic key event to a live Blitz window.
+        r##"blitz-host-key: Dispatch a synthetic key event to a live Blitz window.
 
 USAGE:
     blitz-host key <KEY_SPEC> [OPTIONS] [DESCRIPTOR_PATH]
@@ -252,8 +281,8 @@ ARGUMENTS:
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
-        --node <NODE_ID>     Target specific node integer ID (e.g. 4294967405).
-                             If omitted, dispatches to currently focused element.
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
         --window <ID>        Target specific window ID (optional, defaults to primary window)
     -h, --help               Print help information
@@ -273,62 +302,71 @@ EXAMPLES:
     # 2. Text editing & Shortcuts
     blitz-host key cmd+a
     blitz-host key command+shift+z
-    blitz-host key a --node 4294967405
+    blitz-host key a --selector "#test-input"
     blitz-host key backspace --node 4294967405
-"#
+"##
     );
 }
 
 fn print_mouse_namespace_help() {
     println!(
-        r#"blitz-host-mouse: Pointer and mouse interaction controls for live Blitz windows.
+        r##"blitz-host-mouse: Pointer and mouse interaction controls for live Blitz windows.
 
 USAGE:
     blitz-host mouse <SUBCOMMAND> [OPTIONS]
 
 SUBCOMMANDS:
-    move [NODE_ID] [OPTIONS]       Move cursor to node or explicit coordinates (triggers hover)
-    down [NODE_ID] [OPTIONS]       Press mouse button down on element or coordinates
-    up [NODE_ID] [OPTIONS]         Release mouse button on element or coordinates
-    wheel [NODE_ID] [OPTIONS]      Dispatch mouse wheel / scroll delta (requires --dy)
-    drag <FROM_ID> <TO_ID>         Execute drag sequence from one node to another
+    click <TARGET> [OPTIONS]       Dispatch synthetic click to element (auto-settles)
+    move [TARGET] [OPTIONS]        Move cursor to element or explicit coordinates (triggers hover)
+    down [TARGET] [OPTIONS]        Press mouse button down on element or coordinates
+    up [TARGET] [OPTIONS]          Release mouse button on element or coordinates
+    wheel [TARGET] [OPTIONS]       Dispatch mouse wheel / scroll delta (requires --dy)
+    drag <FROM> <TO> [OPTIONS]     Execute drag sequence between elements (IDs or selectors)
 
 OPTIONS:
     -h, --help                     Print help information
 
 EXAMPLES:
-    # 1. Hover over an element
+    # 1. Click an element via selector or ID
+    blitz-host mouse click "#test-interaction-button"
+    blitz-host mouse click 4294967402
+
+    # 2. Hover over an element
+    blitz-host mouse move "#mouse-test-card"
     blitz-host mouse move 4294967464
 
-    # 2. Move to explicit window coordinates
+    # 3. Move to explicit window coordinates
     blitz-host mouse move --x 150 --y 200
 
-    # 3. Press and release mouse button
-    blitz-host mouse down 4294967464
-    blitz-host mouse up 4294967464
+    # 4. Press and release mouse button
+    blitz-host mouse down "#mouse-test-card"
+    blitz-host mouse up "#mouse-test-card"
 
-    # 4. Scroll vertically by 50px
+    # 5. Scroll vertically by 50px
+    blitz-host mouse wheel "#test-scroll-container" --dy 50
     blitz-host mouse wheel 4294967473 --dy 50
 
-    # 5. Drag and drop from one element to another
-    blitz-host mouse drag 4294967464 4294967449
-"#
+    # 6. Drag and drop from one element to another
+    blitz-host mouse drag "#mouse-test-card" "#test-input"
+"##
     );
 }
 
 fn print_move_help() {
     println!(
-        r#"blitz-host-move: Move mouse / hover pointer over a live Blitz window element or coordinates.
+        r##"blitz-host-move: Move mouse / hover pointer over a live Blitz window element or coordinates.
 
 USAGE:
-    blitz-host mouse move [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
-    blitz-host move [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse move [TARGET] [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    [NODE_ID]                Target node integer ID (e.g. 4294967402). If provided, cursor moves to node center.
+    [TARGET]                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967402, "#mouse-test-card"). If provided, cursor moves to element center.
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --x <X>              Explicit X coordinate in CSS pixels
         --y <Y>              Explicit Y coordinate in CSS pixels
         --pid <PID>          Target specific host process by OS process ID
@@ -339,26 +377,29 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
+    blitz-host mouse move "#mouse-test-card"
     blitz-host mouse move 4294967402
     blitz-host mouse move --x 150 --y 200
-    blitz-host mouse move 4294967402 --pid 37462
-"#
+    blitz-host mouse move "#mouse-test-card" --pid 37462
+"##
     );
 }
 
 fn print_down_help() {
     println!(
-        r#"blitz-host-down: Press mouse button down on a live Blitz window element or coordinates.
+        r##"blitz-host-down: Press mouse button down on a live Blitz window element or coordinates.
 
 USAGE:
-    blitz-host mouse down [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
-    blitz-host down [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse down [TARGET] [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    [NODE_ID]                Target node integer ID (e.g. 4294967402)
+    [TARGET]                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967402, "#mouse-test-card")
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --button <BUTTON>    Mouse button: left, right, middle (default: left)
         --x <X>              Explicit X coordinate in CSS pixels
         --y <Y>              Explicit Y coordinate in CSS pixels
@@ -370,25 +411,27 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
-    blitz-host mouse down 4294967402
+    blitz-host mouse down "#mouse-test-card"
     blitz-host mouse down 4294967402 --button right
-"#
+"##
     );
 }
 
 fn print_up_help() {
     println!(
-        r#"blitz-host-up: Release mouse button on a live Blitz window element or coordinates.
+        r##"blitz-host-up: Release mouse button on a live Blitz window element or coordinates.
 
 USAGE:
-    blitz-host mouse up [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
-    blitz-host up [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse up [TARGET] [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    [NODE_ID]                Target node integer ID (e.g. 4294967402)
+    [TARGET]                 Target element specified by numeric node ID or CSS selector
+                             (e.g. 4294967402, "#mouse-test-card")
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --button <BUTTON>    Mouse button: left, right, middle (default: left)
         --x <X>              Explicit X coordinate in CSS pixels
         --y <Y>              Explicit Y coordinate in CSS pixels
@@ -400,24 +443,27 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
+    blitz-host mouse up "#mouse-test-card"
     blitz-host mouse up 4294967402
-"#
+"##
     );
 }
 
 fn print_wheel_help() {
     println!(
-        r#"blitz-host-wheel: Dispatch mouse wheel / scroll delta on a live Blitz window element.
+        r##"blitz-host-wheel: Dispatch mouse wheel / scroll delta on a live Blitz window element.
 
 USAGE:
-    blitz-host mouse wheel [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
-    blitz-host wheel [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse wheel [TARGET] [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    [NODE_ID]                Target node integer ID (optional, scrolls target element or hover target)
+    [TARGET]                 Target element specified by numeric node ID or CSS selector
+                             (optional, scrolls target element or hover target)
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
         --dy <DY>            Vertical scroll delta in pixels (e.g. 50, -50)
         --dx <DX>            Horizontal scroll delta in pixels (default: 0)
         --x <X>              Explicit X coordinate in CSS pixels
@@ -430,23 +476,23 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
+    blitz-host mouse wheel "#test-scroll-container" --dy 50
     blitz-host mouse wheel 4294967402 --dy 50
-    blitz-host mouse wheel 4294967402 --dy -30 --pid 37462
-"#
+    blitz-host mouse wheel "#test-scroll-container" --dy -30 --pid 37462
+"##
     );
 }
 
 fn print_drag_help() {
     println!(
-        r#"blitz-host-drag: Execute drag sequence from one node to another (down -> move -> up).
+        r##"blitz-host-drag: Execute drag sequence between elements (down -> move -> up).
 
 USAGE:
-    blitz-host mouse drag <FROM_NODE_ID> <TO_NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
-    blitz-host drag <FROM_NODE_ID> <TO_NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host mouse drag <FROM_TARGET> <TO_TARGET> [OPTIONS] [DESCRIPTOR_PATH]
 
 ARGUMENTS:
-    <FROM_NODE_ID>           Source node integer ID to start drag from
-    <TO_NODE_ID>             Destination node integer ID to drop onto
+    <FROM_TARGET>            Source element specified by numeric node ID or CSS selector
+    <TO_TARGET>              Destination element specified by numeric node ID or CSS selector
     [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
 
 OPTIONS:
@@ -458,8 +504,9 @@ NOTE:
     Returns typed ActionResponse JSON on stdout.
 
 EXAMPLES:
+    blitz-host mouse drag "#mouse-test-card" "#test-input"
     blitz-host mouse drag 4294967402 4294967410
-"#
+"##
     );
 }
 
@@ -523,16 +570,29 @@ fn parse_pid_arg(args: &[String]) -> Option<u32> {
     None
 }
 
-fn parse_node_arg(args: &[String]) -> Option<u64> {
+fn parse_target_flag(args: &[String]) -> Option<ElementTarget> {
     for i in 0..args.len() {
-        if (args[i] == "--node" || args[i] == "-n") && i + 1 < args.len() {
-            return args[i + 1].parse().ok();
+        if (args[i] == "--selector" || args[i] == "-s" || args[i] == "--node" || args[i] == "-n") && i + 1 < args.len() {
+            return Some(ElementTarget::from(args[i + 1].as_str()));
         }
-        if let Some(rest) = args[i].strip_prefix("--node=") {
-            return rest.parse().ok();
+        if let Some(rest) = args[i]
+            .strip_prefix("--selector=")
+            .or_else(|| args[i].strip_prefix("-s="))
+            .or_else(|| args[i].strip_prefix("--node="))
+            .or_else(|| args[i].strip_prefix("-n="))
+        {
+            return Some(ElementTarget::from(rest));
         }
     }
     None
+}
+
+#[allow(dead_code)]
+fn parse_node_arg(args: &[String]) -> Option<u64> {
+    parse_target_flag(args).and_then(|t| match t {
+        ElementTarget::Id(id) => Some(id),
+        _ => None,
+    })
 }
 
 fn parse_window_arg(args: &[String]) -> Option<u64> {
@@ -637,7 +697,16 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
             skip_next = false;
             continue;
         }
-        if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" {
+        if arg == "--pid"
+            || arg == "--window"
+            || arg == "--window-id"
+            || arg == "--x"
+            || arg == "--y"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
+        {
             skip_next = true;
             continue;
         }
@@ -646,6 +715,10 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
             || arg.starts_with("--window-id=")
             || arg.starts_with("--x=")
             || arg.starts_with("--y=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
             || arg.starts_with('-')
         {
             continue;
@@ -656,17 +729,8 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         positional.push(arg.as_str());
     }
 
-    let node_id = if !positional.is_empty() {
-        match positional[0].parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
+    let target = parse_target_flag(subargs)
+        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -674,8 +738,8 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         _ => None,
     };
 
-    if node_id.is_none() && coords.is_none() {
-        eprintln!("Error: 'move' requires either a target <NODE_ID> or coordinates (--x and --y).");
+    if target.is_none() && coords.is_none() {
+        eprintln!("Error: 'move' requires either a target <TARGET> (node ID or CSS selector) or coordinates (--x and --y).");
         eprintln!("Run 'blitz-host mouse move --help' for usage.");
         std::process::exit(1);
     }
@@ -694,14 +758,20 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     };
 
     eprintln!(
-        "Dispatching pointer move (node: {:?}, coords: {:?}) (PID: {})...",
-        node_id,
+        "Dispatching pointer move (target: {:?}, coords: {:?}) (PID: {})...",
+        target,
         coords,
         client.descriptor().pid
     );
-    let act_res = client.mouse_move(window_id, node_id, coords, None)?;
+    let act_res = client.mouse_move_target(window_id, target, coords, None)?;
     let _ = client.settle_window(window_id, 2)?;
     println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -718,7 +788,17 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
             skip_next = false;
             continue;
         }
-        if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" || arg == "--button" {
+        if arg == "--pid"
+            || arg == "--window"
+            || arg == "--window-id"
+            || arg == "--x"
+            || arg == "--y"
+            || arg == "--button"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
+        {
             skip_next = true;
             continue;
         }
@@ -728,6 +808,10 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
             || arg.starts_with("--x=")
             || arg.starts_with("--y=")
             || arg.starts_with("--button=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
             || arg.starts_with('-')
         {
             continue;
@@ -738,17 +822,8 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         positional.push(arg.as_str());
     }
 
-    let node_id = if !positional.is_empty() {
-        match positional[0].parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
+    let target = parse_target_flag(subargs)
+        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -771,15 +846,21 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     };
 
     eprintln!(
-        "Dispatching pointer down (node: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
-        node_id,
+        "Dispatching pointer down (target: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
+        target,
         coords,
         button,
         client.descriptor().pid
     );
-    let act_res = client.mouse_down(window_id, node_id, coords, button.as_deref(), None)?;
+    let act_res = client.mouse_down_target(window_id, target, coords, button.as_deref(), None)?;
     let _ = client.settle_window(window_id, 2)?;
     println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -796,7 +877,17 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
             skip_next = false;
             continue;
         }
-        if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" || arg == "--button" {
+        if arg == "--pid"
+            || arg == "--window"
+            || arg == "--window-id"
+            || arg == "--x"
+            || arg == "--y"
+            || arg == "--button"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
+        {
             skip_next = true;
             continue;
         }
@@ -806,6 +897,10 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
             || arg.starts_with("--x=")
             || arg.starts_with("--y=")
             || arg.starts_with("--button=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
             || arg.starts_with('-')
         {
             continue;
@@ -816,17 +911,8 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
         positional.push(arg.as_str());
     }
 
-    let node_id = if !positional.is_empty() {
-        match positional[0].parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
+    let target = parse_target_flag(subargs)
+        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -849,15 +935,21 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
     };
 
     eprintln!(
-        "Dispatching pointer up (node: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
-        node_id,
+        "Dispatching pointer up (target: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
+        target,
         coords,
         button,
         client.descriptor().pid
     );
-    let act_res = client.mouse_up(window_id, node_id, coords, button.as_deref(), None)?;
+    let act_res = client.mouse_up_target(window_id, target, coords, button.as_deref(), None)?;
     let _ = client.settle_window(window_id, 2)?;
     println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -883,6 +975,10 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
             || arg == "--dy"
             || arg == "--delta-x"
             || arg == "--delta-y"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
         {
             skip_next = true;
             continue;
@@ -896,6 +992,10 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
             || arg.starts_with("--dy=")
             || arg.starts_with("--delta-x=")
             || arg.starts_with("--delta-y=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
             || arg.starts_with('-')
         {
             continue;
@@ -906,17 +1006,8 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
         positional.push(arg.as_str());
     }
 
-    let node_id = if !positional.is_empty() {
-        match positional[0].parse::<u64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        None
-    };
+    let target = parse_target_flag(subargs)
+        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -945,16 +1036,22 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
     };
 
     eprintln!(
-        "Dispatching mouse wheel (node: {:?}, dx: {}, dy: {}, coords: {:?}) (PID: {})...",
-        node_id,
+        "Dispatching mouse wheel (target: {:?}, dx: {}, dy: {}, coords: {:?}) (PID: {})...",
+        target,
         dx,
         dy,
         coords,
         client.descriptor().pid
     );
-    let act_res = client.wheel(window_id, node_id, coords, dx, dy, None)?;
+    let act_res = client.wheel_target(window_id, target, coords, dx, dy, None)?;
     let _ = client.settle_window(window_id, 2)?;
     println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -989,22 +1086,94 @@ fn handle_drag_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     }
 
     if positional.len() < 2 {
-        eprintln!("Error: 'drag' requires <FROM_NODE_ID> and <TO_NODE_ID> positional arguments.");
+        eprintln!("Error: 'drag' requires <FROM_TARGET> and <TO_TARGET> positional arguments (node IDs or CSS selectors).");
         eprintln!("Run 'blitz-host mouse drag --help' for usage.");
         std::process::exit(1);
     }
 
-    let from_id: u64 = match positional[0].parse() {
-        Ok(id) => id,
-        Err(_) => {
-            eprintln!("Error: Invalid <FROM_NODE_ID> '{}'. Must be an integer.", positional[0]);
+    let from_target = ElementTarget::from(positional[0]);
+    let to_target = ElementTarget::from(positional[1]);
+
+    let window_id = parse_window_arg(subargs);
+    let selector = determine_selector(subargs);
+
+    let mut client = match DebugClient::connect_target(&selector) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error connecting to Blitz host: {e}");
+            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+            eprintln!("Use 'blitz-host list' to inspect available hosts.");
             std::process::exit(1);
         }
     };
-    let to_id: u64 = match positional[1].parse() {
-        Ok(id) => id,
-        Err(_) => {
-            eprintln!("Error: Invalid <TO_NODE_ID> '{}'. Must be an integer.", positional[1]);
+
+    eprintln!(
+        "Dispatching drag sequence from target '{}' to target '{}' (PID: {})...",
+        from_target,
+        to_target,
+        client.descriptor().pid
+    );
+    let act_res = client.drag_target(from_target, to_target)?;
+    let _ = client.settle_window(window_id, 2)?;
+    println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn handle_click_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if subargs.iter().any(|a| a == "-h" || a == "--help") {
+        print_click_help();
+        return Ok(());
+    }
+
+    let mut positional = Vec::new();
+    let mut skip_next = false;
+    for arg in subargs {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--pid"
+            || arg == "--window"
+            || arg == "--window-id"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
+        {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--pid=")
+            || arg.starts_with("--window=")
+            || arg.starts_with("--window-id=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
+            || arg.starts_with('-')
+        {
+            continue;
+        }
+        if arg.ends_with(".json") || arg.ends_with(".sock") {
+            continue;
+        }
+        positional.push(arg.as_str());
+    }
+
+    let target = parse_target_flag(subargs)
+        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+
+    let target = match target {
+        Some(t) => t,
+        None => {
+            eprintln!("Error: 'click' requires a target <TARGET> argument (node ID or CSS selector).");
+            eprintln!("Run 'blitz-host mouse click --help' for usage.");
             std::process::exit(1);
         }
     };
@@ -1023,14 +1192,19 @@ fn handle_drag_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     };
 
     eprintln!(
-        "Dispatching drag sequence from node #{} to node #{} (PID: {})...",
-        from_id,
-        to_id,
+        "Dispatching click action to target '{}' (PID: {})...",
+        target,
         client.descriptor().pid
     );
-    let act_res = client.drag(from_id, to_id)?;
-    let _ = client.settle_window(window_id, 2)?;
+    let act_res = client.click_target_window(window_id, target)?;
+    let _settle_res = client.settle_window(window_id, 2)?;
     println!("{}", serde_json::to_string_pretty(&act_res)?);
+    if !act_res.success {
+        if let Some(msg) = &act_res.message {
+            eprintln!("Error: {msg}");
+        }
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -1072,6 +1246,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
+            // Extract optional target from `--node <ID>` / `-n <ID>` / `--selector <SEL>` / `-s <SEL>` or positional argument
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--node"
+                    || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
+                    || arg == "--pid"
+                    || arg == "--window"
+                    || arg == "--window-id"
+                {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with('-') || arg.ends_with(".sock") || arg.ends_with(".json") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let target = parse_target_flag(subargs)
+                .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+
             let mut client = match DebugClient::connect_target(&selector) {
                 Ok(c) => c,
                 Err(e) => {
@@ -1082,10 +1284,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let mut req = InspectRequest::default();
-            req.window_id = window_id;
+            let mut req = InspectRequest {
+                window_id,
+                ..Default::default()
+            };
+            if let Some(t) = target {
+                match t {
+                    ElementTarget::Id(id) => req.root_node_id = Some(id),
+                    ElementTarget::Selector(sel) => req.selector = Some(sel),
+                }
+            }
             let response = client.inspect(req)?;
             println!("{}", serde_json::to_string_pretty(&response)?);
+            if response.node_count == 0 && response.message.is_some() {
+                if let Some(msg) = &response.message {
+                    eprintln!("Error: {msg}");
+                }
+                std::process::exit(1);
+            }
             Ok(())
         }
         "capture" => {
@@ -1105,9 +1321,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
+            let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
-            // Extract optional node_id from `--node <ID>` / `-n <ID>` or positional argument
+            // Extract optional target from `--node` / `-n` / `--selector` / `-s` or positional argument
             let mut positional = Vec::new();
             let mut skip_next = false;
             for arg in subargs {
@@ -1119,6 +1336,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || arg == "--output"
                     || arg == "--node"
                     || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
                     || arg == "--pid"
                     || arg == "--window"
                     || arg == "--window-id"
@@ -1132,9 +1351,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 positional.push(arg.as_str());
             }
 
-            let node_id = parse_node_arg(subargs).or_else(|| {
-                positional.first().and_then(|val| val.parse::<u64>().ok())
-            });
+            let target = parse_target_flag(subargs)
+                .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
             let mut client = match DebugClient::connect_target(&selector) {
                 Ok(c) => c,
@@ -1146,9 +1364,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let resp = match node_id {
-                Some(nid) => client.capture_node(nid, &target_file),
-                None => client.capture(&target_file),
+            let resp = match target {
+                Some(t) => client.capture_target_window(window_id, t, &target_file),
+                None => client.capture_window(window_id, &target_file),
             };
 
             let resp = match resp {
@@ -1170,51 +1388,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&resp)?);
             Ok(())
         }
-        "click" => {
-            let subargs = &args[2..];
-            if subargs.iter().any(|a| a == "-h" || a == "--help") {
-                print_click_help();
-                return Ok(());
-            }
-
-            let node_id_str = subargs.iter().find(|a| {
-                !a.starts_with('-')
-                    && !a.ends_with(".json")
-                    && !a.ends_with(".sock")
-                    && a.parse::<u64>().is_ok()
-            });
-            let node_id: u64 = match node_id_str.and_then(|s| s.parse().ok()) {
-                Some(id) => id,
-                None => {
-                    eprintln!("Error: 'click' requires a target <NODE_ID> argument.");
-                    eprintln!("Run 'blitz-host click --help' for usage.");
-                    std::process::exit(1);
-                }
-            };
-
-            let window_id = parse_window_arg(subargs);
-            let selector = determine_selector(subargs);
-
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
-
-            eprintln!(
-                "Dispatching click action to node #{} (PID: {})...",
-                node_id,
-                client.descriptor().pid
-            );
-            let act_res = client.click_window(window_id, node_id)?;
-            let _settle_res = client.settle_window(window_id, 2)?;
-            println!("{}", serde_json::to_string_pretty(&act_res)?);
-            Ok(())
-        }
         "focus" => {
             let subargs = &args[2..];
             if subargs.iter().any(|a| a == "-h" || a == "--help") {
@@ -1222,16 +1395,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let node_id_str = subargs.iter().find(|a| {
-                !a.starts_with('-')
-                    && !a.ends_with(".json")
-                    && !a.ends_with(".sock")
-                    && a.parse::<u64>().is_ok()
-            });
-            let node_id: u64 = match node_id_str.and_then(|s| s.parse().ok()) {
-                Some(id) => id,
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid"
+                    || arg == "--window"
+                    || arg == "--window-id"
+                    || arg == "--node"
+                    || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
+                {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--node=")
+                    || arg.starts_with("-n=")
+                    || arg.starts_with("--selector=")
+                    || arg.starts_with("-s=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let target = parse_target_flag(subargs)
+                .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+
+            let target = match target {
+                Some(t) => t,
                 None => {
-                    eprintln!("Error: 'focus' requires a target <NODE_ID> argument.");
+                    eprintln!("Error: 'focus' requires a target <TARGET> argument (node ID or CSS selector).");
                     eprintln!("Run 'blitz-host focus --help' for usage.");
                     std::process::exit(1);
                 }
@@ -1251,13 +1456,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             eprintln!(
-                "Dispatching focus action to node #{} (PID: {})...",
-                node_id,
+                "Dispatching focus action to target '{}' (PID: {})...",
+                target,
                 client.descriptor().pid
             );
-            let act_res = client.focus_window(window_id, node_id)?;
+            let act_res = client.focus_target_window(window_id, target)?;
             let _settle_res = client.settle_window(window_id, 2)?;
             println!("{}", serde_json::to_string_pretty(&act_res)?);
+            if !act_res.success {
+                if let Some(msg) = &act_res.message {
+                    eprintln!("Error: {msg}");
+                }
+                std::process::exit(1);
+            }
             Ok(())
         }
         "set-value" => {
@@ -1275,13 +1486,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     skip_next = false;
                     continue;
                 }
-                if arg == "--pid" || arg == "--window" || arg == "--window-id" {
+                if arg == "--pid"
+                    || arg == "--window"
+                    || arg == "--window-id"
+                    || arg == "--node"
+                    || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
+                {
                     skip_next = true;
                     continue;
                 }
                 if arg.starts_with("--pid=")
                     || arg.starts_with("--window=")
                     || arg.starts_with("--window-id=")
+                    || arg.starts_with("--node=")
+                    || arg.starts_with("-n=")
+                    || arg.starts_with("--selector=")
+                    || arg.starts_with("-s=")
                     || arg.starts_with('-')
                 {
                     continue;
@@ -1292,24 +1514,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 positional.push(arg.as_str());
             }
 
-            if positional.is_empty() {
-                eprintln!("Error: 'set-value' requires target <NODE_ID> and <VALUE> arguments.");
-                eprintln!("Run 'blitz-host set-value --help' for usage.");
-                std::process::exit(1);
-            }
-
-            let node_id: u64 = match positional[0].parse() {
-                Ok(id) => id,
-                Err(_) => {
-                    eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
-                    std::process::exit(1);
+            let flag_target = parse_target_flag(subargs);
+            let (target, value) = match flag_target {
+                Some(t) => {
+                    let val = positional.first().copied().unwrap_or("").to_string();
+                    (t, val)
                 }
-            };
-
-            let value = if positional.len() > 1 {
-                positional[1].to_string()
-            } else {
-                String::new()
+                None => {
+                    if positional.is_empty() {
+                        eprintln!("Error: 'set-value' requires target <TARGET> and <VALUE> arguments (e.g. '#test-input' 'hello').");
+                        eprintln!("Run 'blitz-host set-value --help' for usage.");
+                        std::process::exit(1);
+                    }
+                    let t = ElementTarget::from(positional[0]);
+                    let val = if positional.len() > 1 {
+                        positional[1].to_string()
+                    } else {
+                        String::new()
+                    };
+                    (t, val)
+                }
             };
 
             let window_id = parse_window_arg(subargs);
@@ -1326,14 +1550,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             eprintln!(
-                "Dispatching set-value action (value: {:?}) to node #{} (PID: {})...",
+                "Dispatching set-value action (value: {:?}) to target '{}' (PID: {})...",
                 value,
-                node_id,
+                target,
                 client.descriptor().pid
             );
-            let act_res = client.set_value_window(window_id, node_id, value)?;
+            let act_res = client.set_value_target_window(window_id, target, value)?;
             let _settle_res = client.settle_window(window_id, 2)?;
             println!("{}", serde_json::to_string_pretty(&act_res)?);
+            if !act_res.success {
+                if let Some(msg) = &act_res.message {
+                    eprintln!("Error: {msg}");
+                }
+                std::process::exit(1);
+            }
             Ok(())
         }
         "key" => {
@@ -1351,7 +1581,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     skip_next = false;
                     continue;
                 }
-                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--node" {
+                if arg == "--pid"
+                    || arg == "--window"
+                    || arg == "--window-id"
+                    || arg == "--node"
+                    || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
+                {
                     skip_next = true;
                     continue;
                 }
@@ -1359,6 +1596,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || arg.starts_with("--window=")
                     || arg.starts_with("--window-id=")
                     || arg.starts_with("--node=")
+                    || arg.starts_with("-n=")
+                    || arg.starts_with("--selector=")
+                    || arg.starts_with("-s=")
                     || arg.starts_with('-')
                 {
                     continue;
@@ -1377,7 +1617,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let raw_key_str = positional[0];
             let (key_str, modifiers) = parse_compound_key(raw_key_str);
-            let node_id = parse_node_arg(subargs);
+            let target = parse_target_flag(subargs);
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
@@ -1392,14 +1632,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             eprintln!(
-                "Dispatching key action '{key_str}' (node: {:?}, modifiers: {:?}) (PID: {})...",
-                node_id,
+                "Dispatching key action '{key_str}' (target: {:?}, modifiers: {:?}) (PID: {})...",
+                target,
                 modifiers,
                 client.descriptor().pid
             );
-            let act_res = client.key_with_modifiers(window_id, node_id, &key_str, modifiers)?;
+            let act_res = client.key_target(window_id, target, &key_str, modifiers)?;
             let _settle_res = client.settle_window(window_id, 2)?;
             println!("{}", serde_json::to_string_pretty(&act_res)?);
+            if !act_res.success {
+                if let Some(msg) = &act_res.message {
+                    eprintln!("Error: {msg}");
+                }
+                std::process::exit(1);
+            }
             Ok(())
         }
         "mouse" => {
@@ -1412,6 +1658,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mouse_subcmd = subargs[0].as_str();
             let mouse_subargs = &subargs[1..];
             match mouse_subcmd {
+                "click" => handle_click_command(mouse_subargs)?,
                 "move" => handle_move_command(mouse_subargs)?,
                 "down" => handle_down_command(mouse_subargs)?,
                 "up" => handle_up_command(mouse_subargs)?,
@@ -1428,12 +1675,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         }
-        // Top-level aliases for pointer commands
-        "move" => handle_move_command(&args[2..]),
-        "down" => handle_down_command(&args[2..]),
-        "up" => handle_up_command(&args[2..]),
-        "wheel" => handle_wheel_command(&args[2..]),
-        "drag" => handle_drag_command(&args[2..]),
+        "click" | "move" | "down" | "up" | "wheel" | "drag" => {
+            eprintln!("Error: '{subcmd}' is a pointer command and belongs under the 'mouse' namespace. Run 'blitz-host mouse {subcmd} ...' instead.");
+            std::process::exit(1);
+        }
         other => {
             eprintln!("Unknown subcommand: '{other}'. Use 'blitz-host --help' for available subcommands.");
             std::process::exit(1);

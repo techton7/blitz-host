@@ -688,7 +688,7 @@ fn test_live_native_runner_attach_and_inspect() {
         let found_pid = list_json.as_array().unwrap().iter().any(|h| h["pid"] == pid);
         assert!(found_pid, "blitz-host list JSON must contain live host PID");
 
-        // 13.2: inspect outputs clean JSON
+        // 13.2a: full-window inspect outputs clean JSON
         let inspect_output = Command::new(&cli_path)
             .args(["inspect", "--pid", &pid.to_string()])
             .output()
@@ -698,6 +698,29 @@ fn test_live_native_runner_attach_and_inspect() {
         let inspect_json: serde_json::Value = serde_json::from_str(inspect_stdout.trim())
             .expect("blitz-host inspect must output valid JSON");
         assert_eq!(inspect_json["documentId"], 1);
+
+        // 13.2b: subtree inspect with positional [NODE_ID] outputs compact subtree starting at target node
+        let subtree_pos_output = Command::new(&cli_path)
+            .args(["inspect", &card_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host inspect [NODE_ID] failed");
+        assert!(subtree_pos_output.status.success());
+        let subtree_pos_stdout = String::from_utf8_lossy(&subtree_pos_output.stdout);
+        let subtree_pos_json: serde_json::Value = serde_json::from_str(subtree_pos_stdout.trim())
+            .expect("blitz-host inspect positional subtree must output valid JSON");
+        assert_eq!(subtree_pos_json["rootId"], card_id);
+        assert!(subtree_pos_json["nodes"].as_array().unwrap().len() <= inspect_json["nodes"].as_array().unwrap().len());
+
+        // 13.2c: subtree inspect with explicit --node <NODE_ID>
+        let subtree_flag_output = Command::new(&cli_path)
+            .args(["inspect", "--node", &card_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host inspect --node failed");
+        assert!(subtree_flag_output.status.success());
+        let subtree_flag_stdout = String::from_utf8_lossy(&subtree_flag_output.stdout);
+        let subtree_flag_json: serde_json::Value = serde_json::from_str(subtree_flag_stdout.trim())
+            .expect("blitz-host inspect flag subtree must output valid JSON");
+        assert_eq!(subtree_flag_json["rootId"], card_id);
 
         // 13.3: key with compound specifier (cmd+a)
         let key_output = Command::new(&cli_path)
@@ -710,7 +733,7 @@ fn test_live_native_runner_attach_and_inspect() {
             .expect("blitz-host key must output valid JSON");
         assert_eq!(key_json["success"], true);
 
-        // 13.4: mouse namespace action (mouse move)
+        // 13.4a: mouse namespace action (mouse move)
         let mouse_output = Command::new(&cli_path)
             .args(["mouse", "move", &card_id.to_string(), "--pid", &pid.to_string()])
             .output()
@@ -720,6 +743,40 @@ fn test_live_native_runner_attach_and_inspect() {
         let mouse_json: serde_json::Value = serde_json::from_str(mouse_stdout.trim())
             .expect("blitz-host mouse move must output valid JSON");
         assert_eq!(mouse_json["success"], true);
+
+        // 13.4b: mouse namespace action (mouse click)
+        let mouse_click_output = Command::new(&cli_path)
+            .args(["mouse", "click", &button_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host mouse click failed");
+        assert!(mouse_click_output.status.success());
+        let mouse_click_stdout = String::from_utf8_lossy(&mouse_click_output.stdout);
+        let mouse_click_json: serde_json::Value = serde_json::from_str(mouse_click_stdout.trim())
+            .expect("blitz-host mouse click must output valid JSON");
+        assert_eq!(mouse_click_json["success"], true);
+
+        // 13.4c: top-level pointer command without mouse namespace MUST fail (zero fallback)
+        let fail_click_output = Command::new(&cli_path)
+            .args(["click", &button_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("top-level click command failed to execute");
+        assert_eq!(fail_click_output.status.code(), Some(1), "top-level click must exit with code 1");
+        let fail_click_stderr = String::from_utf8_lossy(&fail_click_output.stderr);
+        assert!(
+            fail_click_stderr.contains("belongs under the 'mouse' namespace"),
+            "stderr must direct user to use 'blitz-host mouse click'"
+        );
+
+        let fail_move_output = Command::new(&cli_path)
+            .args(["move", &card_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("top-level move command failed to execute");
+        assert_eq!(fail_move_output.status.code(), Some(1), "top-level move must exit with code 1");
+        let fail_move_stderr = String::from_utf8_lossy(&fail_move_output.stderr);
+        assert!(
+            fail_move_stderr.contains("belongs under the 'mouse' namespace"),
+            "stderr must direct user to use 'blitz-host mouse move'"
+        );
 
         // 13.5: capture without -o MUST fail with exit code 1
         let fail_cap_output = Command::new(&cli_path)
@@ -787,6 +844,105 @@ fn test_live_native_runner_attach_and_inspect() {
         assert!(std::path::Path::new(cli_flag_path).exists(), "Output node flag PNG file must exist on disk");
 
         println!("  • blitz-host CLI verified: Always-on JSON, compound keys, mouse namespace, full-window & node mandatory -o metadata JSON!");
+
+        // -----------------------------------------------------------------
+        // STEP 14: CSS Selector targeting proof across CLI and Client
+        // -----------------------------------------------------------------
+        println!("\n[STEP 14] Proving querySelector-style CSS selector targeting...");
+
+        // 14.1: Client API inspect_target with CSS selector
+        let sel_inspect = client
+            .inspect_target("#test-input")
+            .expect("inspect_target with selector should succeed");
+        assert!(sel_inspect.node_count > 0, "inspect_target must return matched subtree");
+        assert_eq!(sel_inspect.nodes[0].dom_id.as_deref(), Some("test-input"));
+
+        // 14.2: CLI mouse click via CSS selector
+        let sel_click_output = Command::new(&cli_path)
+            .args(["mouse", "click", "#test-interaction-button", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host mouse click with selector failed");
+        assert!(sel_click_output.status.success(), "blitz-host mouse click #test-interaction-button must succeed");
+        let sel_click_stdout = String::from_utf8_lossy(&sel_click_output.stdout);
+        let sel_click_json: serde_json::Value = serde_json::from_str(sel_click_stdout.trim())
+            .expect("blitz-host mouse click must output valid JSON");
+        assert_eq!(sel_click_json["success"], true);
+
+        // 14.3: CLI focus via CSS selector
+        let sel_focus_output = Command::new(&cli_path)
+            .args(["focus", "#test-input", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host focus with selector failed");
+        assert!(sel_focus_output.status.success(), "blitz-host focus #test-input must succeed");
+        let sel_focus_stdout = String::from_utf8_lossy(&sel_focus_output.stdout);
+        let sel_focus_json: serde_json::Value = serde_json::from_str(sel_focus_stdout.trim())
+            .expect("blitz-host focus must output valid JSON");
+        assert_eq!(sel_focus_json["success"], true);
+
+        // 14.4: CLI set-value via CSS selector
+        let test_text = "Typed via CSS selector proof!";
+        let sel_setval_output = Command::new(&cli_path)
+            .args(["set-value", "#test-input", test_text, "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host set-value with selector failed");
+        assert!(sel_setval_output.status.success(), "blitz-host set-value #test-input must succeed");
+        let sel_setval_stdout = String::from_utf8_lossy(&sel_setval_output.stdout);
+        let sel_setval_json: serde_json::Value = serde_json::from_str(sel_setval_stdout.trim())
+            .expect("blitz-host set-value must output valid JSON");
+        assert_eq!(sel_setval_json["success"], true);
+
+        // 14.5: CLI inspect subtree via CSS selector
+        let sel_inspect_output = Command::new(&cli_path)
+            .args(["inspect", "#mouse-test-card", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host inspect with selector failed");
+        assert!(sel_inspect_output.status.success(), "blitz-host inspect #mouse-test-card must succeed");
+        let sel_inspect_stdout = String::from_utf8_lossy(&sel_inspect_output.stdout);
+        let sel_inspect_json: serde_json::Value = serde_json::from_str(sel_inspect_stdout.trim())
+            .expect("blitz-host inspect must output valid JSON");
+        assert!(sel_inspect_json["nodeCount"].as_u64().unwrap_or(0) > 0);
+        assert_eq!(sel_inspect_json["nodes"][0]["domId"], "mouse-test-card");
+
+        // 14.6: CLI capture node via CSS selector
+        let cli_sel_crop = "target/cli_proof_selector_card.png";
+        let _ = std::fs::remove_file(cli_sel_crop);
+        let sel_cap_output = Command::new(&cli_path)
+            .args(["capture", "#mouse-test-card", "-o", cli_sel_crop, "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host capture with selector failed");
+        assert!(sel_cap_output.status.success(), "blitz-host capture #mouse-test-card must succeed");
+        let sel_cap_stdout = String::from_utf8_lossy(&sel_cap_output.stdout);
+        let sel_cap_json: serde_json::Value = serde_json::from_str(sel_cap_stdout.trim())
+            .expect("blitz-host capture must output valid metadata JSON");
+        assert_eq!(sel_cap_json["success"], true);
+        assert!(sel_cap_json["filePath"].as_str().unwrap().ends_with(cli_sel_crop));
+        assert!(sel_cap_json.get("dataBase64").is_none());
+        assert!(std::path::Path::new(cli_sel_crop).exists(), "Output selector PNG file must exist on disk");
+
+        // 14.7: CLI mouse move via CSS selector
+        let sel_move_output = Command::new(&cli_path)
+            .args(["mouse", "move", "#mouse-test-card", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host mouse move with selector failed");
+        assert!(sel_move_output.status.success(), "blitz-host mouse move #mouse-test-card must succeed");
+        let sel_move_stdout = String::from_utf8_lossy(&sel_move_output.stdout);
+        let sel_move_json: serde_json::Value = serde_json::from_str(sel_move_stdout.trim())
+            .expect("blitz-host mouse move must output valid JSON");
+        assert_eq!(sel_move_json["success"], true);
+
+        // 14.8: Non-existent selector MUST fail cleanly with exit code 1
+        let fail_sel_output = Command::new(&cli_path)
+            .args(["mouse", "click", "#non-existent-element-xyz", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host mouse click failed to execute");
+        assert_eq!(fail_sel_output.status.code(), Some(1), "click on non-existent selector must exit with code 1");
+        let fail_sel_stderr = String::from_utf8_lossy(&fail_sel_output.stderr);
+        assert!(
+            fail_sel_stderr.contains("not found in document") || fail_sel_stderr.contains("Node or selector"),
+            "stderr must report element/selector not found: {fail_sel_stderr}"
+        );
+
+        println!("  • CSS selector targeting verified: inspect, click, focus, set-value, move, capture, and clean failure for missing elements!");
     }
 
     // Terminate child process cleanly

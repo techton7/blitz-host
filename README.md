@@ -47,10 +47,16 @@ cargo run -p blitz-host --bin blitz-host -- [SUBCOMMAND]
 blitz-host --help
 ```
 
-### 2. Inspect Live Window
+### 2. Inspect Live Window or Subtree
 ```bash
 # Returns full semantic DOM tree with computed layout bounds as deterministic JSON
 blitz-host inspect
+
+# Inspect a specific subtree starting at CSS selector or node ID
+blitz-host inspect "#mouse-test-card"
+blitz-host inspect --selector "#mouse-test-card"
+blitz-host inspect 4294967464
+blitz-host inspect --node 4294967464
 
 # Target a specific host by PID
 blitz-host inspect --pid 37462
@@ -61,20 +67,21 @@ blitz-host inspect --pid 37462
 # Full-window capture (returns metadata JSON on stdout; PNG saved to disk)
 blitz-host capture -o target/screenshot.png
 
-# Node / Subtree crop capture
+# Node / Subtree crop capture via CSS selector or node ID
+blitz-host capture "#mouse-test-card" -o target/card.png
+blitz-host capture --selector "#mouse-test-card" -o target/card.png
 blitz-host capture 4294967464 -o target/card.png
 blitz-host capture --node 4294967464 -o target/card.png
 ```
 
 ### 4. Interactive UI Actions with Auto-Settle
 ```bash
-# Click an element by node ID
-blitz-host click 4294967402
-
-# Focus an input element
+# Focus an input element via CSS selector or node ID
+blitz-host focus "#test-input"
 blitz-host focus 4294967403
 
-# Set input value
+# Set input value via CSS selector or node ID
+blitz-host set-value "#test-input" "Hello Native"
 blitz-host set-value 4294967403 "Hello Native"
 
 # Dispatch keyboard shortcut with compound modifiers
@@ -82,12 +89,14 @@ blitz-host key cmd+a
 blitz-host key shift+tab
 blitz-host key enter
 
-# Dispatch pointer events via mouse namespace
-blitz-host mouse move 4294967402
-blitz-host mouse down 4294967402
-blitz-host mouse up 4294967402
-blitz-host mouse wheel 4294967402 --dy 50
-blitz-host mouse drag 4294967402 4294967410
+# Dispatch pointer events via mouse namespace (accepts selectors or node IDs)
+blitz-host mouse click "#test-interaction-button"
+blitz-host mouse click 4294967402
+blitz-host mouse move "#mouse-test-card"
+blitz-host mouse down "#mouse-test-card"
+blitz-host mouse up "#mouse-test-card"
+blitz-host mouse wheel "#test-scroll-container" --dy 50
+blitz-host mouse drag "#mouse-test-card" "#test-input"
 ```
 
 ---
@@ -101,12 +110,11 @@ use std::time::Duration;
 // 1. Discover and connect to active Blitz desktop window
 let mut client = DebugClient::connect_discovered(None)?;
 
-// 2. Inspect live semantic DOM tree
-let snapshot = client.inspect(InspectRequest::default())?;
-let button = snapshot.nodes.iter().find(|n| n.tag == "button").unwrap();
+// 2. Inspect live semantic DOM tree via CSS selector or full window
+let sub_tree = client.inspect_target("#test-input")?;
 
-// 3. Dispatch click and auto-settle frames
-client.click(button.id)?;
+// 3. Dispatch click via CSS selector and auto-settle frames
+client.click_target("#test-interaction-button")?;
 client.settle(2)?;
 
 // 4. Verify resulting UI state change deterministically
