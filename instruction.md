@@ -1,4 +1,4 @@
-# Worker Instruction: Add the First `subtree / node-level capture` Lane via Crop-Based Capture
+# Worker Instruction: Simplify `capture` to Required File Output + Metadata JSON Only
 
 You are working in:
 
@@ -6,19 +6,11 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current stack already proves:
+The current capture lane works, but its interface is still too heavy.
 
-1. attach
-2. inspect
-3. click / focus / set-value
-4. bounded keyboard lane
-5. core mouse / pointer / wheel lane
-6. full-window capture
-7. process targeting
+The new direction is fixed:
 
-The next visual refinement is now fixed:
-
-> **add the first `subtree / node-level capture` lane**
+> **`capture` should always require an output file path and should return metadata JSON only — no inline base64 payloads, no fallback behavior**
 
 Write all agent-facing reasoning in English.
 
@@ -35,147 +27,123 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Implement the first useful `node` / `subtree` visual capture lane.
+Simplify the `blitz-host capture` contract so that it behaves like a clean artifact-producing command.
 
-The intended first version should be:
+The intended model is:
 
-1. inspect-selected node
-2. capture the full rendered surface
-3. crop the image to the node’s visual bounds
-4. return or write the cropped image as the proof artifact
+1. user must provide `-o/--output <FILE>`
+2. capture always writes the artifact to disk
+3. stdout returns only metadata JSON
+4. inline base64 image payload support is removed
 
-This is the right first step because it gives strong local visual proof without requiring a larger renderer redesign.
+This applies to both:
 
----
-
-## 2. Preferred Implementation Strategy
-
-Use the current working seams.
-
-### Preferred v1 approach
-
-> **full capture + node-bounds crop**
-
-That means:
-
-1. reuse the current full-window/document capture pipeline
-2. resolve node bounds from the existing inspect/layout data
-3. crop the rendered image to the selected node rect
-4. emit that crop as the result
-
-This is preferred over attempting a full “true subtree render” in the first pass.
-
-### Important note
-
-Do **not** add new external repo dependencies just to do this first slice if the current code already has what is needed.
-
-You may refer to prior reference work for ideas, but the implementation should stand on the current local seams unless a hard blocker appears.
+1. full-window capture
+2. node/subtree crop capture
 
 ---
 
-## 3. Scope Boundary
+## 2. Required Changes
 
-### Must implement
+### A. CLI behavior
 
-1. requesting capture for a specific node/subtree
-2. bounds-based crop of the current rendered surface
-3. live proof that the resulting artifact corresponds to the selected node
+Update the `blitz-host capture` command so that:
 
-### Explicitly defer
+1. `-o/--output` is **required**
+2. omitting it is a usage error
+3. there is no default fallback filename generation
+4. there is no inline-image-on-stdout behavior
 
-Do **not** expand into:
+The CLI should clearly communicate the requirement in its help output and errors.
 
-1. full subtree-aware renderer specialization
-2. visual diff engines
-3. video / streaming capture
-4. arbitrary region selection unrelated to inspect-selected nodes
+### B. JSON output contract
 
-Keep it to:
+The JSON output should remain always-on, but it should be **metadata JSON only**.
 
-> inspect-selected node/subtree crop
+Reasonable fields include:
 
----
+1. `success`
+2. `width`
+3. `height`
+4. `format`
+5. `filePath`
+6. `nodeId` or equivalent when node capture is used
+7. `message`
 
-## 4. Suggested Surface
+The image bytes themselves should not be included in the JSON response.
 
-The exact type shape is up to you, but a reasonable direction is:
+### C. Client / protocol surface
 
-1. extend `CaptureRequest` with `node_id: Option<u64>`
-2. when `node_id` is `None`, preserve current full-window capture behavior
-3. when `node_id` is `Some(id)`, capture full surface and crop to the node’s bounds
+If the current wire model is built around base64 image data:
 
-If a node’s bounds are missing or invalid, report that honestly instead of silently pretending capture succeeded.
+1. remove or deprecate that inline payload
+2. align client APIs with file-oriented or raw-byte-oriented internal behavior as appropriate
+3. make sure the public story is consistent with the CLI simplification
 
----
-
-## 5. Required Proof Targets
-
-You must prove that the cropped image meaningfully corresponds to the selected node.
-
-Good proof targets include:
-
-1. `#test-interaction-button`
-2. `#test-input`
-3. `#mouse-test-card`
-4. another visually distinct element already used in the canonical example / harness
-
-The proof should demonstrate:
-
-1. inspect finds the node and its bounds
-2. capture with `node_id` produces a smaller crop than the full window where appropriate
-3. the crop dimensions match or correspond to the node bounds
-4. the image artifact is valid and non-empty
-
-If possible, use an element with distinctive styling so the crop is clearly meaningful.
+Do not leave hidden legacy payloads pretending to still be part of the supported contract if they are not.
 
 ---
 
-## 6. Honesty Constraints
+## 3. Explicitly Remove
 
-You must be explicit about what this first capture lane really is.
+Remove these behaviors from the current supported `capture` story:
 
-If it is:
+1. `data_base64` in the public JSON response
+2. `--json` meaning “inline the PNG blob”
+3. default file path fallback behavior for `capture`
 
-> **full-scene render followed by crop**
+If internal helpers still need raw bytes before file write, that is fine.
 
-say that plainly.
+The point is:
 
-Do **not** describe it as if the renderer is doing a native node-only render pass unless that is actually true.
-
-This matters because the implementation strategy is acceptable — but only if reported honestly.
+> the **public contract** should be file artifact + metadata JSON only.
 
 ---
 
-## 7. Files / Areas to Reinspect
+## 4. What Not to Break
+
+Do not break:
+
+1. full-window capture functionality
+2. node/subtree crop capture functionality
+3. the rest of the control-plane proof path
+4. deterministic JSON stdout behavior
+
+The simplification should change interface shape, not actual capture correctness.
+
+---
+
+## 5. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-6. current capture code and current inspect/bounds code
-7. canonical `cross_host` example and/or `oxidase-native-runner` for proof targets
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+7. any capture-specific helpers in the bridge/client layers
 
 ---
 
-## 8. Validation You Must Run
+## 6. Validation You Must Run
 
-Run the smallest commands that honestly prove the slice.
+Run the smallest commands that prove the simpler contract works.
 
 At minimum:
 
-1. the relevant `blitz-host` tests after changing capture surfaces
-2. at least one live native proof against a running host
-3. verification that the cropped artifact is valid and non-empty
-4. confirmation that the existing full-window capture still works
+1. validate `blitz-host capture -o <FILE>` for full-window capture
+2. validate `blitz-host capture --node <ID> -o <FILE>` (or equivalent) for node/subtree capture
+3. confirm stdout is valid metadata JSON only
+4. confirm no inline base64 payload remains in the public CLI contract
+5. rerun the relevant test suite(s) so the simplified capture interface remains green
 
 If markdown files are edited, validate them.
 
 ---
 
-## 9. `result.md` Requirement
+## 7. `result.md` Requirement
 
 Update:
 
@@ -183,22 +151,23 @@ Update:
 
 It must explicitly record:
 
-1. what request surface changed
-2. whether the implementation is crop-based or true subtree render
-3. how node bounds are resolved
-4. what live proof was observed
-5. what still remains deferred
+1. what public capture surface changed
+2. that `-o/--output` is now required
+3. that inline base64 JSON payload support was removed
+4. what metadata JSON now looks like
+5. what validation proved the new contract
+6. what remains deferred
 
 ---
 
-## 10. Final Verdict Rule
+## 8. Final Verdict Rule
 
-You may report **Implemented and proven** only if:
+You may report **Implemented and simplified** only if:
 
-1. node-level capture really exists
-2. it is proven against a live native host
-3. the implementation scope is described honestly
-4. full-window capture and existing control-plane features still work
+1. `capture` requires an explicit output path
+2. metadata JSON remains valid and useful
+3. inline base64 output is removed from the public contract
+4. capture still works for full-window and node/subtree cases
 
 Otherwise report:
 
@@ -208,4 +177,4 @@ or
 
 The purpose of this pass is:
 
-> connect inspect-selected nodes to local visual proof through the smallest honest node/subtree capture implementation.
+> make `capture` a clean artifact-producing command instead of a mixed file/blob interface.

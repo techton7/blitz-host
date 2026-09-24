@@ -23,8 +23,9 @@ pub use host::{init_default, init_global, init_if_debug, init_if_debug_default, 
 pub use dioxus::BlitzHost;
 
 pub use blitz_host_protocol::{
-    ActionRequest, ActionResponse, ControlRequest, ControlResponse, HostDescriptor, InspectRequest,
-    InspectResponse, SettleRequest, SettleResponse,
+    ActionRequest, ActionResponse, CaptureMetadataResponse, CaptureRequest, CaptureResponse,
+    ControlRequest, ControlResponse, HostDescriptor, InspectRequest, InspectResponse, SettleRequest,
+    SettleResponse,
 };
 pub use blitz_host_transport::DebugClient;
 

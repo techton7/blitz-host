@@ -290,3 +290,61 @@ Per `instruction.md` Section 6, this is explicitly a **crop-based capture (`full
 4. **Non-Regressing Baseline**:
    - Full workspace test suite passes `ok. 7 passed; 0 failed`.
    - Headless semantics suite passes `ok. 3 passed; 0 failed`.
+
+---
+
+## 9. CLI Ergonomization, Always-On JSON, Mandatory `-o`, and Metadata JSON
+
+### 9.1 What Public Surface Changed
+1. **Always-On JSON Protocol**:
+   - The `--json` flag was removed from all CLI subcommands (`list`, `inspect`, `capture`, `click`, `focus`, `set-value`, `key`, `mouse *`).
+   - `stdout` is now reserved strictly for valid, pretty-printed JSON payloads across all subcommands.
+   - All diagnostic, connection, and VSync settle progress logs were redirected to `stderr` (`eprintln!`), guaranteeing that `stdout` is pipeable to `jq` or AI agent tool parsers without corruption.
+2. **Mandatory Output Path for `capture` (`-o` / `--output`)**:
+   - `-o <PATH>` / `--output <PATH>` is now strictly required for all `capture` invocations (both full-window and node crop).
+   - Omitting `-o` immediately fails with exit code `1` and a clear error message.
+   - Ambiguous default fallback filenames (e.g. `blitz-capture-<PID>.png`) and scattered disk artifacts are completely eliminated.
+3. **Removal of Inline Base64 from Public JSON Response**:
+   - The public CLI response no longer dumps raw `data_base64` image strings to stdout.
+   - `capture` writes the image bytes directly to the mandatory `-o` file path on disk, and emits lightweight `CaptureMetadataResponse` JSON.
+4. **Compound Key Specification (`key`)**:
+   - Removed separate modifier flags (`--shift`, `--ctrl`, `--alt`, `--meta`, `--cmd`).
+   - Added compound key parser supporting `+` delimiter (e.g. `cmd+a`, `command+shift+z`, `shift+tab`, `enter`, `escape`, `ctrl+c`).
+   - Modifiers (`cmd`, `command`, `meta`, `super`, `shift`, `ctrl`, `control`, `alt`, `opt`, `option`) and named keys (`tab`, `enter`, `return`, `esc`, `escape`, `backspace`, `del`, `delete`, `space`, `arrow*`) are matched case-insensitively.
+5. **`mouse` Namespace Hierarchy**:
+   - Grouped pointer interactions under `blitz-host mouse <move|down|up|wheel|drag>`, cleaning up top-level CLI namespace pollution.
+   - Maintained top-level `move`, `down`, `up`, `wheel`, `drag` as backward-compatible aliases.
+6. **Hierarchical `--help` / `-h` Documentation**:
+   - Added consolidated `blitz-host mouse --help` namespace documentation.
+   - Updated main help and individual subcommand help manuals to reflect compound keys and default JSON format.
+
+### 9.2 Public Metadata JSON Format
+The `blitz-host capture` command now outputs strictly typed metadata JSON on `stdout`:
+```json
+{
+  "success": true,
+  "filePath": "target/cli_proof_node_card.png",
+  "width": 618,
+  "height": 40,
+  "format": "png",
+  "nodeId": 4294967464,
+  "bytes": 7443,
+  "message": "Captured node #4294967464 cropped to 618x40 PNG visual screenshot (7443 bytes)"
+}
+```
+
+### 9.3 Live Validation Evidence
+1. **Live Native Host E2E Suite (`crates/blitz-host-transport/tests/live_inspect.rs` Step 13)**:
+   - `blitz-host list` verified: produces valid JSON array containing live host PID.
+   - `blitz-host inspect` verified: produces valid JSON object with `documentId: 1`.
+   - `blitz-host key cmd+a` verified: dispatches compound shortcut with `success: true`.
+   - `blitz-host mouse move` verified: dispatches pointer movement via namespace with `success: true`.
+   - `blitz-host capture` without `-o` verified: exits with code `1` and explains `-o` requirement.
+   - `blitz-host capture 4294967464 -o target/cli_proof_node_card.png` verified: writes valid PNG to disk and outputs metadata JSON with no `dataBase64` property.
+2. **Automated Suite Results**:
+   - `cargo test --manifest-path util/blitz-host/Cargo.toml -- --nocapture`: `ok. 7 passed; 0 failed`.
+   - `cargo test --manifest-path blitz/Cargo.toml -p dioxus-native-dom -- test_synthetic`: `ok. 3 passed; 0 failed`.
+
+### 9.4 What Remains Deferred
+1. **Multi-touch Gestures**: Pinch-to-zoom and multi-finger pan remain deferred.
+2. **Interactive REPL Session**: Persistent `blitz-host shell` keep-alive mode remains a future priority.

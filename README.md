@@ -49,23 +49,45 @@ blitz-host --help
 
 ### 2. Inspect Live Window
 ```bash
-# Formatted human-readable DOM tree with layout bounds
+# Returns full semantic DOM tree with computed layout bounds as deterministic JSON
 blitz-host inspect
 
-# Machine-readable JSON output for jq or AI agents
-blitz-host inspect --json
-
-# Subcommand-specific help
-blitz-host inspect --help
+# Target a specific host by PID
+blitz-host inspect --pid 37462
 ```
 
-### 3. Click Elements with Auto-Settle
+### 3. Visual Screenshot Capture (Mandatory Output File)
 ```bash
-# Dispatches native synthetic click and auto-settles 2 VSync frames
+# Full-window capture (returns metadata JSON on stdout; PNG saved to disk)
+blitz-host capture -o target/screenshot.png
+
+# Node / Subtree crop capture
+blitz-host capture 4294967464 -o target/card.png
+blitz-host capture --node 4294967464 -o target/card.png
+```
+
+### 4. Interactive UI Actions with Auto-Settle
+```bash
+# Click an element by node ID
 blitz-host click 4294967402
 
-# Subcommand-specific help
-blitz-host click --help
+# Focus an input element
+blitz-host focus 4294967403
+
+# Set input value
+blitz-host set-value 4294967403 "Hello Native"
+
+# Dispatch keyboard shortcut with compound modifiers
+blitz-host key cmd+a
+blitz-host key shift+tab
+blitz-host key enter
+
+# Dispatch pointer events via mouse namespace
+blitz-host mouse move 4294967402
+blitz-host mouse down 4294967402
+blitz-host mouse up 4294967402
+blitz-host mouse wheel 4294967402 --dy 50
+blitz-host mouse drag 4294967402 4294967410
 ```
 
 ---

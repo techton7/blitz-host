@@ -374,6 +374,30 @@ pub struct CaptureResponse {
     pub message: Option<String>,
 }
 
+/// Metadata result of capturing a visual screenshot to a file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureMetadataResponse {
+    /// Whether capture was successful.
+    pub success: bool,
+    /// Absolute or relative path to the saved PNG file on disk.
+    pub file_path: String,
+    /// Rendered image width in physical pixels.
+    pub width: u32,
+    /// Rendered image height in physical pixels.
+    pub height: u32,
+    /// Image format (e.g. "png").
+    pub format: String,
+    /// Target node ID that was cropped, if requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<u64>,
+    /// Number of PNG bytes written to disk.
+    pub bytes: usize,
+    /// Optional status or failure message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
 /// Top-level control request envelope forwarded across the transport.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]

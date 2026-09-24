@@ -677,11 +677,134 @@ fn test_live_native_runner_attach_and_inspect() {
     assert!(!invalid_cap_resp.success, "capture on non-existent node must report success=false");
     assert!(invalid_cap_resp.message.as_deref().unwrap().contains("not found in document"));
 
+    // =========================================================================
+    // STEP 13: Live blitz-host CLI Verification (Always-on JSON, mandatory -o, compound key, mouse namespace)
+    // =========================================================================
+    let cli_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/debug/blitz-host");
+
+    if cli_path.exists() {
+        println!("Testing blitz-host CLI against live native host (PID {})...", pid);
+
+        // 13.1: list outputs clean JSON
+        let list_output = Command::new(&cli_path)
+            .arg("list")
+            .output()
+            .expect("blitz-host list failed");
+        assert!(list_output.status.success());
+        let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+        let list_json: serde_json::Value = serde_json::from_str(list_stdout.trim())
+            .expect("blitz-host list must output valid JSON");
+        assert!(list_json.is_array());
+        let found_pid = list_json.as_array().unwrap().iter().any(|h| h["pid"] == pid);
+        assert!(found_pid, "blitz-host list JSON must contain live host PID");
+
+        // 13.2: inspect outputs clean JSON
+        let inspect_output = Command::new(&cli_path)
+            .args(["inspect", "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host inspect failed");
+        assert!(inspect_output.status.success());
+        let inspect_stdout = String::from_utf8_lossy(&inspect_output.stdout);
+        let inspect_json: serde_json::Value = serde_json::from_str(inspect_stdout.trim())
+            .expect("blitz-host inspect must output valid JSON");
+        assert_eq!(inspect_json["documentId"], 1);
+
+        // 13.3: key with compound specifier (cmd+a)
+        let key_output = Command::new(&cli_path)
+            .args(["key", "cmd+a", "--node", &input_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host key failed");
+        assert!(key_output.status.success());
+        let key_stdout = String::from_utf8_lossy(&key_output.stdout);
+        let key_json: serde_json::Value = serde_json::from_str(key_stdout.trim())
+            .expect("blitz-host key must output valid JSON");
+        assert_eq!(key_json["success"], true);
+
+        // 13.4: mouse namespace action (mouse move)
+        let mouse_output = Command::new(&cli_path)
+            .args(["mouse", "move", &card_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host mouse move failed");
+        assert!(mouse_output.status.success());
+        let mouse_stdout = String::from_utf8_lossy(&mouse_output.stdout);
+        let mouse_json: serde_json::Value = serde_json::from_str(mouse_stdout.trim())
+            .expect("blitz-host mouse move must output valid JSON");
+        assert_eq!(mouse_json["success"], true);
+
+        // 13.5: capture without -o MUST fail with exit code 1
+        let fail_cap_output = Command::new(&cli_path)
+            .args(["capture", &card_id.to_string(), "--pid", &pid.to_string()])
+            .output()
+            .expect("capture execution failed");
+        assert_eq!(fail_cap_output.status.code(), Some(1), "capture without -o must exit with 1");
+        let fail_stderr = String::from_utf8_lossy(&fail_cap_output.stderr);
+        assert!(fail_stderr.contains("Output path is required"), "stderr must explain -o requirement");
+
+        // 13.6: full-window capture with -o produces valid metadata JSON (no base64) and writes PNG artifact
+        let cli_full_path = "target/cli_proof_full_window.png";
+        let _ = std::fs::remove_file(cli_full_path);
+
+        let full_cap_output = Command::new(&cli_path)
+            .args(["capture", "-o", cli_full_path, "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host capture full-window with -o failed");
+        assert!(full_cap_output.status.success(), "blitz-host capture full-window must succeed");
+        let full_cap_stdout = String::from_utf8_lossy(&full_cap_output.stdout);
+        let full_cap_json: serde_json::Value = serde_json::from_str(full_cap_stdout.trim())
+            .expect("blitz-host capture full-window must output valid metadata JSON");
+        assert_eq!(full_cap_json["success"], true);
+        assert_eq!(full_cap_json["filePath"], cli_full_path);
+        assert_eq!(full_cap_json["width"], 800);
+        assert_eq!(full_cap_json["height"], 600);
+        assert!(full_cap_json["nodeId"].is_null(), "full-window capture must have null nodeId");
+        assert!(full_cap_json.get("dataBase64").is_none(), "CRITICAL PROOF: metadata JSON must NOT contain dataBase64");
+        assert!(std::path::Path::new(cli_full_path).exists(), "Output full-window PNG file must exist on disk");
+
+        // 13.7: node capture with positional <NODE_ID> and -o
+        let cli_artifact_path = "target/cli_proof_node_card.png";
+        let _ = std::fs::remove_file(cli_artifact_path);
+
+        let cap_output = Command::new(&cli_path)
+            .args(["capture", &card_id.to_string(), "-o", cli_artifact_path, "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host capture with -o failed");
+        assert!(cap_output.status.success(), "blitz-host capture with -o must succeed");
+        let cap_stdout = String::from_utf8_lossy(&cap_output.stdout);
+        let cap_json: serde_json::Value = serde_json::from_str(cap_stdout.trim())
+            .expect("blitz-host capture must output valid metadata JSON");
+        assert_eq!(cap_json["success"], true);
+        assert_eq!(cap_json["filePath"], cli_artifact_path);
+        assert_eq!(cap_json["nodeId"], card_id);
+        assert!(cap_json.get("dataBase64").is_none(), "CRITICAL PROOF: metadata JSON must NOT contain dataBase64");
+        assert!(std::path::Path::new(cli_artifact_path).exists(), "Output node PNG file must exist on disk");
+
+        // 13.8: node capture with explicit --node <NODE_ID> and -o
+        let cli_flag_path = "target/cli_proof_node_card_flag.png";
+        let _ = std::fs::remove_file(cli_flag_path);
+
+        let cap_flag_output = Command::new(&cli_path)
+            .args(["capture", "--node", &card_id.to_string(), "-o", cli_flag_path, "--pid", &pid.to_string()])
+            .output()
+            .expect("blitz-host capture --node with -o failed");
+        assert!(cap_flag_output.status.success(), "blitz-host capture --node with -o must succeed");
+        let cap_flag_stdout = String::from_utf8_lossy(&cap_flag_output.stdout);
+        let cap_flag_json: serde_json::Value = serde_json::from_str(cap_flag_stdout.trim())
+            .expect("blitz-host capture --node must output valid metadata JSON");
+        assert_eq!(cap_flag_json["success"], true);
+        assert_eq!(cap_flag_json["filePath"], cli_flag_path);
+        assert_eq!(cap_flag_json["nodeId"], card_id);
+        assert!(cap_flag_json.get("dataBase64").is_none(), "CRITICAL PROOF: metadata JSON must NOT contain dataBase64");
+        assert!(std::path::Path::new(cli_flag_path).exists(), "Output node flag PNG file must exist on disk");
+
+        println!("  • blitz-host CLI verified: Always-on JSON, compound keys, mouse namespace, full-window & node mandatory -o metadata JSON!");
+    }
+
     // Terminate child process cleanly
     let _ = child.kill();
     let _ = child.wait();
 
     println!("=================================================================");
-    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, SUBTREE CAPTURE PROOF PASSED 100%!");
+    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, SUBTREE CAPTURE, CLI PROOF PASSED 100%!");
     println!("=================================================================");
 }
