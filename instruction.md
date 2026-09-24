@@ -1,4 +1,4 @@
-# Worker Instruction: Expand `blitz-host` to a Bounded Core Keyboard Lane
+# Worker Instruction: Fix and Finish the Core Mouse / Pointer / Wheel Lane Truthfully
 
 You are working in:
 
@@ -6,18 +6,9 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current `blitz-host` stack already proves:
+The previous pass moved the pointer/wheel lane in the right direction, but it is **not complete yet** because the live native E2E proof is currently failing.
 
-1. attach
-2. inspect
-3. click
-4. focus
-5. set-value
-6. settle
-7. capture
-8. process targeting
-
-The next slice should now expand beyond the initial two-key idea into a **bounded core keyboard lane**.
+This pass must first restore a truthful green baseline and then finish the slice.
 
 Write all agent-facing reasoning in English.
 
@@ -34,227 +25,129 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Add the smallest *useful* core keyboard surface for real workflow automation.
+Finish the current core mouse / pointer / wheel slice **for real**.
 
-This pass should cover:
+That means:
 
-### A. Focus / activation keys
+1. identify and fix the current hover-proof mismatch
+2. make the implementation and the proof expectations agree
+3. rerun the full `blitz-host` suite honestly
+4. only then report completion
 
-1. `Tab`
-2. `Shift+Tab`
-3. `Enter`
-4. `Space`
-5. `Escape`
+The immediate problem is not “which future pointer features to add.”
 
-### B. Text editing essentials
+The immediate problem is:
 
-1. `Backspace`
-2. `Delete`
-
-### C. Navigation essentials
-
-1. `ArrowLeft`
-2. `ArrowRight`
-3. `ArrowUp`
-4. `ArrowDown`
-
-### D. One modifier sentinel
-
-1. **`Ctrl/Cmd + A`** as the explicit modifier-path proof case
-
-The purpose is not “all keyboard behavior forever.”
-
-The purpose is:
-
-> prove that the real keyboard injection path is broad enough to drive common app workflows, including one meaningful modifier combination.
+> the current live pointer proof is failing, so the result text is ahead of reality.
 
 ---
 
-## 2. Responsibility Boundary
+## 2. Known Current Failure
 
-Keep the responsibility split honest:
+At the time of this instruction, the following command does **not** pass cleanly:
 
-1. **Blitz / Dioxus Native own keyboard semantics**
-   - focus traversal behavior
-   - submit behavior
-   - selection behavior
-   - text editing behavior
-2. **`blitz-host` owns**
-   - key injection surface
-   - transport/protocol expression
-   - settle / inspect observation
-   - black-box proof that the real runtime behavior happened
+```bash
+cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture
+```
 
-Do **not** re-implement browser/editor semantics inside `blitz-host`.
+The concrete observed failure is in the live native E2E hover proof:
 
-This is a control-plane proof task, not a new text engine.
+1. target node (`#mouse-test-card`) had one ID
+2. `InspectResponse.hover_node_id` returned a different node ID
+3. the test panicked because its assertion expected the hover target to be the card itself or a narrowly-defined child
 
----
+You must treat this as a real failing state.
 
-## 3. Scope Boundary
-
-### Must implement
-
-1. a typed keyboard action surface sufficient for the core key set above
-2. modifier support sufficient for `Ctrl/Cmd + A`
-3. black-box proof targets that demonstrate real workflow effects
-
-### Explicitly defer
-
-Do **not** expand into:
-
-1. full shortcut matrix
-2. IME / composition
-3. clipboard shortcuts
-4. platform-specific accelerator universe
-5. giant editor behavior suite
-
-Keep it to the bounded core set.
+Do not report success until it is fixed and the full suite passes.
 
 ---
 
-## 4. Preferred Proof Targets
+## 3. The Real Design Question You Must Resolve
 
-You must prove keyboard behavior through inspect-visible workflow changes.
+You must make the implementation and the proof model agree on what “hover target” means.
 
-### A. Focus traversal proof
+Possible outcomes include:
 
-Use `Tab` / `Shift+Tab` to prove:
+1. **the implementation is right and the test expectation is wrong**
+   - for example, the true hover hit target is a deeper descendant than the test allowed
+2. **the implementation is publishing the wrong hover identity**
+   - for example, the inspect surface should be reporting a different node identity or additional context
+3. **the inspect surface needs a clearer contract**
+   - for example, some distinction between directly hit node vs. logical/semantic hover container
 
-1. focus moves between expected elements
-2. inspect reflects the new focused node
-
-### B. Submit / activation proof
-
-Use `Enter` and/or `Space` to prove:
-
-1. a focused button or submit target activates
-2. a visible status / state change occurs
-
-### C. Editing proof
-
-Use `Backspace` / `Delete` / arrow keys as appropriate to prove:
-
-1. text editing state changes
-2. cursor/navigation-sensitive behavior is actually going through the runtime
-
-### D. Modifier sentinel proof
-
-Use **`Ctrl/Cmd + A`** to prove modifier-path integrity.
-
-The preferred black-box scenario is:
-
-1. set an input to a known longer string
-2. focus the input
-3. inject `Ctrl/Cmd + A`
-4. replace or overwrite text afterward
-5. inspect and prove the replacement happened as expected
-
-This gives you real coverage of:
-
-1. modifier serialization
-2. platform-aware mapping
-3. selection pipeline
-4. follow-up editing behavior
+Pick the correct one from source/runtime evidence and align the code/tests/result accordingly.
 
 ---
 
-## 5. Platform Mapping Rule
+## 4. Scope of This Pass
 
-For the modifier sentinel, be honest about platform reality:
+### Must do
 
-1. macOS should use `Cmd+A`
-2. Windows/Linux should use `Ctrl+A`
+1. repair the current failing hover proof
+2. ensure the pointer/wheel surface is internally consistent
+3. rerun the tests and live proof honestly
+4. correct any overclaim in `result.md`
 
-If you introduce a higher-level “select all” semantic helper internally, that is acceptable.
+### May do
 
-If you keep a raw key+modifier surface, that is also acceptable.
+If fixing the hover mismatch reveals small adjacent consistency issues caused by the same change, fix those too.
 
-But the proof must explicitly show that modifier-aware behavior works on the current native target.
+### Must not do
 
----
+1. do not jump to another new feature slice
+2. do not weaken the proof by making the test meaningless
+3. do not hide the issue with vague wording
 
-## 6. Preferred Test Route
-
-Use the same honest three-stage route:
-
-### Stage 1 — protocol / transport unit route
-
-Validate:
-
-1. serialization of the new keyboard action surface
-2. transport/client request and response handling
-3. no regression in existing control-plane features
-
-### Stage 2 — headless semantics route
-
-Use the cheapest honest route available (for example a headless Dioxus/Blitz harness) to verify:
-
-1. `Tab` / `Shift+Tab`
-2. `Enter` / `Space`
-3. editing keys
-4. `Ctrl/Cmd + A`
-
-This is where you cheaply falsify bad key injection or event-model assumptions.
-
-### Stage 3 — live native E2E route
-
-Final proof should use:
-
-1. canonical `cross_host` example as the first public-consumer proof target
-2. `oxidase-native-runner` as the secondary/native-proof harness target if useful
-
-The first-class story should still be the canonical consumer example where practical.
+This is a “make the current mouse lane true” pass.
 
 ---
 
-## 7. What Not to Do
+## 5. Required Truthfulness Standard
 
-1. do not expand to full keyboard universe
-2. do not claim coverage of all modifiers just because `Ctrl/Cmd + A` works
-3. do not stop at “request returned success”
-4. do not let hidden internal state replace inspect-visible proof
+You must align:
 
-This pass should remain:
+1. protocol meaning
+2. inspection output
+3. bridge/runtime behavior
+4. live test expectations
+5. result narrative
 
-> core keyboard workflow support, not total keyboard completeness.
+If the implementation returns one identity while the proof assumes a different identity, you must resolve that mismatch explicitly.
+
+Do not simply declare the current behavior “good enough” without deciding what the hover contract actually is.
 
 ---
 
-## 8. Files / Areas to Reinspect
+## 6. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase/examples/cross_host/`
-7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/oxidase/crates/oxidase-native-runner/`
-8. any headless harness route suitable for cheap keyboard semantics validation
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/src/inspect.rs`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/tests/live_inspect.rs`
+5. any pointer dispatch code in `dioxus-native-dom` or related native event plumbing
+6. any example/harness UI elements used as pointer proof targets
 
 ---
 
-## 9. Validation You Must Run
+## 7. Validation You Must Run
 
-Run the smallest commands that honestly prove the slice.
+Run the same command that is currently known to fail and make it pass honestly:
 
-At minimum:
+```bash
+cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture
+```
 
-1. protocol / transport tests for the new keyboard surface
-2. a headless semantics proof for the bounded core key set
-3. live native E2E against `cross_host`
-4. continued proof or regression checks against `oxidase-native-runner`
-5. confirmation that attach / inspect / click / focus / set-value / capture still work after the change
+Also rerun any additional targeted commands needed to justify the final hover/pointer contract.
 
-Do not call this complete if only the low-level request succeeds but the workflow effect is unproven.
+Do not call this complete until the full `blitz-host` suite is green again.
 
 If markdown files are edited, validate them.
 
 ---
 
-## 10. `result.md` Requirement
+## 8. `result.md` Requirement
 
 Update:
 
@@ -262,26 +155,22 @@ Update:
 
 It must explicitly record:
 
-1. what keyboard action surface was added
-2. how focus traversal was proven
-3. how submit/activation was proven
-4. how editing/navigation was proven
-5. how the modifier sentinel (`Ctrl/Cmd + A`) was proven
-6. what headless semantics route was used
-7. what live E2E proof was observed
-8. what remains deferred
+1. what the hover mismatch actually was
+2. whether the implementation or the proof expectation changed
+3. what the final hover contract is
+4. what validation now passes
+5. what remains deferred
 
 ---
 
-## 11. Final Verdict Rule
+## 9. Final Verdict Rule
 
 You may report **Implemented and proven** only if:
 
-1. the bounded core key set is real
-2. `Ctrl/Cmd + A` proves modifier-path integrity
-3. the resulting workflow changes are inspect-visible after settle
-4. the proof remains black-box and honest
-5. existing control-plane functionality still works
+1. the full `blitz-host` suite is green again
+2. the hover/pointer contract is explicit and internally consistent
+3. the result text no longer overclaims
+4. the mouse / pointer / wheel lane proof is real
 
 Otherwise report:
 
@@ -291,4 +180,4 @@ or
 
 The purpose of this pass is:
 
-> turn `blitz-host` from click/input primitives into a bounded but genuinely useful keyboard workflow control surface.
+> make the current pointer/wheel slice actually true in code, tests, and explanation before moving on.

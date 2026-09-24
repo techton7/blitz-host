@@ -157,20 +157,28 @@ impl HostControl {
         0
     }
 
-    /// Dispatches UI actions (Click, Focus, SetValue, Key) using provided closures.
-    pub fn handle_action<C, F, S, K>(
+    /// Dispatches UI actions (Click, Focus, SetValue, Key, MouseMove, MouseDown, MouseUp, Wheel) using provided closures.
+    pub fn handle_action<C, F, S, K, M, MD, MU, W>(
         action_req: &ActionRequest,
         base_doc: &mut BaseDocument,
         mut click_fn: C,
         mut focus_fn: F,
         mut set_value_fn: S,
         mut key_fn: K,
+        mut mouse_move_fn: M,
+        mut mouse_down_fn: MD,
+        mut mouse_up_fn: MU,
+        mut wheel_fn: W,
     ) -> Result<ActionResponse, String>
     where
         C: FnMut(&mut BaseDocument, u64) -> bool,
         F: FnMut(&mut BaseDocument, u64) -> bool,
         S: FnMut(&mut BaseDocument, u64, &str) -> bool,
         K: FnMut(&mut BaseDocument, Option<u64>, &str, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
+        M: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
+        MD: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<&str>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
+        MU: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<&str>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
+        W: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, f64, f64, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
     {
         match action_req {
             ActionRequest::Click { node_id, .. } => {
@@ -214,6 +222,62 @@ impl HostControl {
                         message: Some(format!("Dispatched synthetic key '{key}' to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
+                }
+            }
+            ActionRequest::MouseMove { node_id, x, y, modifiers, .. } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_move_fn(base_doc, *node_id, coords, *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        message: Some(format!("Dispatched synthetic mouse move to node #{target_nid}")),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse move: {e}")),
+                }
+            }
+            ActionRequest::MouseDown { node_id, x, y, button, modifiers, .. } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_down_fn(base_doc, *node_id, coords, button.as_deref(), *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        message: Some(format!("Dispatched synthetic mouse down to node #{target_nid}")),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse down: {e}")),
+                }
+            }
+            ActionRequest::MouseUp { node_id, x, y, button, modifiers, .. } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_up_fn(base_doc, *node_id, coords, button.as_deref(), *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        message: Some(format!("Dispatched synthetic mouse up to node #{target_nid}")),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse up: {e}")),
+                }
+            }
+            ActionRequest::Wheel { node_id, x, y, delta_x, delta_y, modifiers, .. } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match wheel_fn(base_doc, *node_id, coords, *delta_x, *delta_y, *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        message: Some(format!("Dispatched synthetic wheel ({delta_x}, {delta_y}) to node #{target_nid}")),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch wheel: {e}")),
                 }
             }
         }

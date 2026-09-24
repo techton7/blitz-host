@@ -67,6 +67,19 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
 
         let is_focused = doc.get_focussed_node_id() == Some(node_id);
         let focused = if is_focused { Some(true) } else { None };
+        let hovered = if node.is_hovered() { Some(true) } else { None };
+        let active = if node.is_active() { Some(true) } else { None };
+        let scroll_offset = match &node.data {
+            NodeData::Element(_) | NodeData::AnonymousBlock(_) | NodeData::Document(_) => {
+                let offset = *node.scroll_offset();
+                if offset.x != 0.0 || offset.y != 0.0 {
+                    Some([offset.x, offset.y])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
 
         let children_ids: Vec<u64> = node.children.iter().map(|c| c.as_u64()).collect();
 
@@ -84,9 +97,19 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
             text,
             bounds,
             focused,
+            hovered,
+            active,
+            scroll_offset,
             children: children_ids,
         });
     }
+
+    let vp_scroll = doc.viewport_scroll();
+    let viewport_scroll = if vp_scroll.x != 0.0 || vp_scroll.y != 0.0 {
+        Some([vp_scroll.x, vp_scroll.y])
+    } else {
+        None
+    };
 
     InspectResponse {
         document_id,
@@ -94,6 +117,8 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         node_count: nodes.len(),
         current_frame: None,
         focused_node_id: doc.get_focussed_node_id().map(|id| id.as_u64()),
+        hover_node_id: doc.get_hover_node_id().map(|id| id.as_u64()),
+        viewport_scroll,
         nodes,
     }
 }

@@ -116,6 +116,84 @@ pub fn BlitzHost(children: Element) -> Element {
                                 )
                                 .map(|nid| nid.as_u64())
                             },
+                            |d, nid, coords, mods| {
+                                let mut kb_mods = keyboard_types::Modifiers::empty();
+                                if let Some(m) = mods {
+                                    if m.shift { kb_mods |= keyboard_types::Modifiers::SHIFT; }
+                                    if m.ctrl { kb_mods |= keyboard_types::Modifiers::CONTROL; }
+                                    if m.alt { kb_mods |= keyboard_types::Modifiers::ALT; }
+                                    if m.meta { kb_mods |= keyboard_types::Modifiers::SUPER; }
+                                }
+                                dioxus_native::dispatch_synthetic_pointer_move(
+                                    d,
+                                    nid.map(blitz_dom::NodeId::from_u64),
+                                    coords,
+                                    kb_mods,
+                                )
+                                .map(|nid| nid.as_u64())
+                            },
+                            |d, nid, coords, btn, mods| {
+                                let mut kb_mods = keyboard_types::Modifiers::empty();
+                                if let Some(m) = mods {
+                                    if m.shift { kb_mods |= keyboard_types::Modifiers::SHIFT; }
+                                    if m.ctrl { kb_mods |= keyboard_types::Modifiers::CONTROL; }
+                                    if m.alt { kb_mods |= keyboard_types::Modifiers::ALT; }
+                                    if m.meta { kb_mods |= keyboard_types::Modifiers::SUPER; }
+                                }
+                                let button = match btn {
+                                    Some("right") | Some("secondary") => dioxus_native::MouseEventButton::Secondary,
+                                    Some("middle") | Some("auxiliary") => dioxus_native::MouseEventButton::Auxiliary,
+                                    _ => dioxus_native::MouseEventButton::Main,
+                                };
+                                dioxus_native::dispatch_synthetic_pointer_down(
+                                    d,
+                                    nid.map(blitz_dom::NodeId::from_u64),
+                                    coords,
+                                    button,
+                                    kb_mods,
+                                )
+                                .map(|nid| nid.as_u64())
+                            },
+                            |d, nid, coords, btn, mods| {
+                                let mut kb_mods = keyboard_types::Modifiers::empty();
+                                if let Some(m) = mods {
+                                    if m.shift { kb_mods |= keyboard_types::Modifiers::SHIFT; }
+                                    if m.ctrl { kb_mods |= keyboard_types::Modifiers::CONTROL; }
+                                    if m.alt { kb_mods |= keyboard_types::Modifiers::ALT; }
+                                    if m.meta { kb_mods |= keyboard_types::Modifiers::SUPER; }
+                                }
+                                let button = match btn {
+                                    Some("right") | Some("secondary") => dioxus_native::MouseEventButton::Secondary,
+                                    Some("middle") | Some("auxiliary") => dioxus_native::MouseEventButton::Auxiliary,
+                                    _ => dioxus_native::MouseEventButton::Main,
+                                };
+                                dioxus_native::dispatch_synthetic_pointer_up(
+                                    d,
+                                    nid.map(blitz_dom::NodeId::from_u64),
+                                    coords,
+                                    button,
+                                    kb_mods,
+                                )
+                                .map(|nid| nid.as_u64())
+                            },
+                            |d, nid, coords, dx, dy, mods| {
+                                let mut kb_mods = keyboard_types::Modifiers::empty();
+                                if let Some(m) = mods {
+                                    if m.shift { kb_mods |= keyboard_types::Modifiers::SHIFT; }
+                                    if m.ctrl { kb_mods |= keyboard_types::Modifiers::CONTROL; }
+                                    if m.alt { kb_mods |= keyboard_types::Modifiers::ALT; }
+                                    if m.meta { kb_mods |= keyboard_types::Modifiers::SUPER; }
+                                }
+                                dioxus_native::dispatch_synthetic_wheel(
+                                    d,
+                                    nid.map(blitz_dom::NodeId::from_u64),
+                                    coords,
+                                    dx,
+                                    dy,
+                                    kb_mods,
+                                )
+                                .map(|nid| nid.as_u64())
+                            },
                         )
                     },
                 );

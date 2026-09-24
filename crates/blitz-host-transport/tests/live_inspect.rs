@@ -432,7 +432,170 @@ fn test_live_native_runner_attach_and_inspect() {
     );
 
     // =========================================================================
-    // STEP 10: Visual Capture Proof (Live Visual Screenshot PNG)
+    // STEP 10: Live Core Mouse / Pointer / Wheel Lane Verification
+    // =========================================================================
+    println!("Testing live core mouse / pointer / wheel lane against running native host...");
+
+    let card_node = post_esc_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("mouse-test-card"))
+        .expect("must find #mouse-test-card in semantic tree");
+    let card_id = card_node.id;
+
+    let scroll_container_node = post_esc_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("test-scroll-container"))
+        .expect("must find #test-scroll-container in semantic tree");
+    let scroll_id = scroll_container_node.id;
+
+    // 10.1: Pointer Move / Hover
+    println!("Testing live pointer move / hover on #mouse-test-card (node #{})...", card_id);
+    let move_resp = client.hover(card_id).expect("hover action failed");
+    assert!(move_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_hover_inspect = client.inspect(InspectRequest::default()).unwrap();
+    println!("  • Observed hover_node_id: {:?}", post_hover_inspect.hover_node_id);
+    let post_hover_card = post_hover_inspect
+        .nodes
+        .iter()
+        .find(|n| n.id == card_id)
+        .expect("card must exist");
+
+    let is_card_or_child_hovered_target = match post_hover_inspect.hover_node_id {
+        Some(hid) => hid == card_id || post_hover_card.children.contains(&hid),
+        None => false,
+    };
+    assert!(
+        is_card_or_child_hovered_target,
+        "CRITICAL PROOF: hover_node_id in InspectResponse must equal card_id or its child"
+    );
+
+    let is_hover_state_active = post_hover_card.hovered == Some(true)
+        || post_hover_inspect
+            .nodes
+            .iter()
+            .any(|n| n.parent_id == Some(card_id) && n.hovered == Some(true));
+    println!("  • Card hovered state: {:?}", post_hover_card.hovered);
+    assert!(
+        is_hover_state_active,
+        "CRITICAL PROOF: Card or its inner element must report hovered == Some(true)"
+    );
+
+    let hover_status_node = post_hover_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("hover-status"))
+        .expect("must find hover-status");
+    let hover_text = extract_text_under(&post_hover_inspect.nodes, hover_status_node.id);
+    println!("  • Observed #hover-status: {:?}", hover_text);
+    assert_eq!(
+        hover_text.as_deref(),
+        Some("HOVERED"),
+        "CRITICAL PROOF: onmouseenter event must trigger Dioxus reactivity and render HOVERED"
+    );
+
+    // 10.2: Pointer Down
+    println!("Testing live pointer down on #mouse-test-card...");
+    let down_resp = client
+        .mouse_down(None, Some(card_id), None, Some("left"), None)
+        .expect("mouse_down failed");
+    assert!(down_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_down_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let post_down_card = post_down_inspect
+        .nodes
+        .iter()
+        .find(|n| n.id == card_id)
+        .expect("card must exist");
+    let is_card_or_child_active = post_down_card.active == Some(true)
+        || post_down_inspect
+            .nodes
+            .iter()
+            .any(|n| n.parent_id == Some(card_id) && n.active == Some(true));
+    println!("  • Card active state: {:?}", post_down_card.active);
+    assert!(
+        is_card_or_child_active,
+        "CRITICAL PROOF: Card or its inner element must report active == Some(true) on pointer down"
+    );
+
+    let press_status_node = post_down_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("pressed-status"))
+        .expect("must find pressed-status");
+    let press_text = extract_text_under(&post_down_inspect.nodes, press_status_node.id);
+    println!("  • Observed #pressed-status: {:?}", press_text);
+    assert_eq!(
+        press_text.as_deref(),
+        Some("PRESSED"),
+        "CRITICAL PROOF: onpointerdown event must trigger Dioxus reactivity and render PRESSED"
+    );
+
+    // 10.3: Pointer Up
+    println!("Testing live pointer up on #mouse-test-card...");
+    let up_resp = client
+        .mouse_up(None, Some(card_id), None, Some("left"), None)
+        .expect("mouse_up failed");
+    assert!(up_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_up_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let post_up_card = post_up_inspect
+        .nodes
+        .iter()
+        .find(|n| n.id == card_id)
+        .expect("card must exist");
+    assert_ne!(
+        post_up_card.active,
+        Some(true),
+        "CRITICAL PROOF: Card SemanticNode active state must clear on pointer up"
+    );
+
+    let press_status_node_up = post_up_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("pressed-status"))
+        .expect("must find pressed-status");
+    let press_text_up = extract_text_under(&post_up_inspect.nodes, press_status_node_up.id);
+    println!("  • Observed #pressed-status after up: {:?}", press_text_up);
+    assert_eq!(
+        press_text_up.as_deref(),
+        Some("RELEASED"),
+        "CRITICAL PROOF: onpointerup event must trigger Dioxus reactivity and render RELEASED"
+    );
+
+    // 10.4: Composed Drag Sequence
+    println!("Testing composed drag sequence from card to input...");
+    let drag_resp = client.drag(card_id, input_id).expect("drag sequence failed");
+    assert!(drag_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    // 10.5: Wheel / Scroll
+    println!("Testing wheel scroll on #test-scroll-container (node #{})...", scroll_id);
+    let wheel_resp = client.scroll(scroll_id, 45.0).expect("scroll action failed");
+    assert!(wheel_resp.success);
+    let _ = client.settle(2).expect("settle failed");
+
+    let post_wheel_inspect = client.inspect(InspectRequest::default()).unwrap();
+    let scroll_status_node = post_wheel_inspect
+        .nodes
+        .iter()
+        .find(|n| n.dom_id.as_deref() == Some("scroll-status"))
+        .expect("must find scroll-status");
+    let scroll_status_text = extract_text_under(&post_wheel_inspect.nodes, scroll_status_node.id);
+    println!("  • Observed #scroll-status: {:?}", scroll_status_text);
+    assert_eq!(
+        scroll_status_text.as_deref(),
+        Some("Scroll Y: 45"),
+        "CRITICAL PROOF: onwheel event must update Dioxus reactivity and report new scroll position"
+    );
+
+    // =========================================================================
+    // STEP 11: Visual Capture Proof (Live Visual Screenshot PNG)
     // =========================================================================
     println!("Capturing visual screenshot from live native host...");
     let cap_resp = client.capture().expect("capture request failed");

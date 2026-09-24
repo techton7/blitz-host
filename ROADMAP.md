@@ -320,43 +320,51 @@ In short:
 
 > first prove **attach + inspect** end to end, then add **act + settle**, then clarify the `oxidase` boundary, then establish the canonical cross-host example, then move on to broader expansion.
 
-## Next expansion categories
+## Current next-step priorities
 
-Now that the initial attach / inspect / act / settle / `oxidase`-boundary / example split work is established, the roadmap should treat the next steps as three explicit expansion categories:
+Now that the stack already has:
 
-### Category 1 - multi-window targeting & discovery UX
+1. attach / inspect
+2. click / focus / set-value
+3. bounded core keyboard lane
+4. process-level targeting
+5. full-window visual capture
+6. the `oxidase` boundary and canonical example/harness split
 
-This is now the most immediate usability gap.
+the immediate next work should be treated as **two main implementation lanes**:
+
+### Priority 1 - richer mouse / pointer / wheel control
+
+This is the next practical interaction gap.
 
 Focus:
 
-1. identifying which live Blitz window is which
-2. better descriptor metadata (for example window/app identity)
-3. explicit selection UX (`list`, `--pid`, instance selection, descriptor targeting)
-4. making multiple simultaneously-running windows practical for agent control
+1. hover / pointer move
+2. pointer down / up
+3. drag
+4. wheel / scroll
 
-### Category 2 - richer control / input surface
+The goal is to move from keyboard/click-driven workflows to more complete desktop interaction coverage.
 
-The current proven interaction is click-only.
+### Priority 2 - subtree / node-level capture
 
-Next likely additions:
+The current visual proof lane already supports full-window/document capture.
 
-1. focus
-2. set-value / text input
-3. keyboard actions
-4. hover / pointer / scroll as needed
+The next visual refinement should stay narrow:
 
-The goal is to move from “can click a button” toward “can drive real app workflows.”
+1. target a specific node/subtree
+2. crop to its visual bounds
+3. prove that the captured pixels correspond to the inspect-selected element
 
-### Category 3 - capture & richer diagnostics
+This is the most valuable next step for visual proof because it directly links semantic selection to rendered-pixel evidence without expanding into a full visual diff platform yet.
 
-After targeting and richer control improve, the next major value lane is observability beyond semantic DOM:
+## Later expansion categories
 
-1. visual capture / screenshot support
-2. richer diagnostics streams
-3. eventually stronger rendering/debug proof surfaces
+After the two priorities above, later categories can include:
 
-This is where `blitz-host` becomes more useful for debugging visual/native rendering issues that DOM inspection alone cannot prove.
+1. richer diagnostics streams
+2. broader multi-window routing when the runtime genuinely needs it
+3. shared cross-host (`web`/`native`) scenario surfaces at the `oxidase` layer
 
 ## Security posture
 

@@ -205,6 +205,126 @@ impl DebugClient {
         self.key_with_modifiers(None, node_id, "a", Some(KeyModifiers::action_modifier()))
     }
 
+    /// Move pointer / mouse to a target node or specific coordinates with optional modifiers.
+    pub fn mouse_move(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        coords: Option<(f32, f32)>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseMove {
+            window_id,
+            node_id,
+            x,
+            y,
+            modifiers,
+        })
+    }
+
+    /// Hover over a target node on the primary window.
+    pub fn hover(&mut self, node_id: u64) -> io::Result<ActionResponse> {
+        self.mouse_move(None, Some(node_id), None, None)
+    }
+
+    /// Move pointer to a target node on the primary window.
+    pub fn move_to(&mut self, node_id: u64) -> io::Result<ActionResponse> {
+        self.mouse_move(None, Some(node_id), None, None)
+    }
+
+    /// Move pointer to explicit viewport coordinates on the primary window.
+    pub fn move_to_coords(&mut self, x: f32, y: f32) -> io::Result<ActionResponse> {
+        self.mouse_move(None, None, Some((x, y)), None)
+    }
+
+    /// Press mouse button down on a target node or coordinates.
+    pub fn mouse_down(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        coords: Option<(f32, f32)>,
+        button: Option<&str>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseDown {
+            window_id,
+            node_id,
+            x,
+            y,
+            button: button.map(|s| s.to_string()),
+            modifiers,
+        })
+    }
+
+    /// Release mouse button on a target node or coordinates.
+    pub fn mouse_up(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        coords: Option<(f32, f32)>,
+        button: Option<&str>,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        self.act(ActionRequest::MouseUp {
+            window_id,
+            node_id,
+            x,
+            y,
+            button: button.map(|s| s.to_string()),
+            modifiers,
+        })
+    }
+
+    /// Execute a drag sequence from `from_node_id` to `to_node_id` by composing move -> down -> move -> up.
+    pub fn drag(&mut self, from_node_id: u64, to_node_id: u64) -> io::Result<ActionResponse> {
+        self.mouse_move(None, Some(from_node_id), None, None)?;
+        self.mouse_down(None, Some(from_node_id), None, Some("left"), None)?;
+        self.mouse_move(None, Some(to_node_id), None, None)?;
+        self.mouse_up(None, Some(to_node_id), None, Some("left"), None)
+    }
+
+    /// Dispatch mouse wheel / scroll event on a target node or coordinates.
+    pub fn wheel(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+        coords: Option<(f32, f32)>,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<KeyModifiers>,
+    ) -> io::Result<ActionResponse> {
+        let (x, y) = match coords {
+            Some((cx, cy)) => (Some(cx), Some(cy)),
+            None => (None, None),
+        };
+        self.act(ActionRequest::Wheel {
+            window_id,
+            node_id,
+            x,
+            y,
+            delta_x,
+            delta_y,
+            modifiers,
+        })
+    }
+
+    /// Scroll a target node by vertical delta on the primary window.
+    pub fn scroll(&mut self, node_id: u64, delta_y: f64) -> io::Result<ActionResponse> {
+        self.wheel(None, Some(node_id), None, 0.0, delta_y, None)
+    }
+
     /// Synchronize execution by waiting for `frames` VSync / render ticks on the default window.
     pub fn settle(&mut self, frames: u32) -> io::Result<SettleResponse> {
         self.settle_window(None, frames)

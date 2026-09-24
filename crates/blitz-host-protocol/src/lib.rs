@@ -75,6 +75,15 @@ pub struct SemanticNode {
     /// Whether this node currently holds active keyboard focus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused: Option<bool>,
+    /// Whether this node currently has mouse hover state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hovered: Option<bool>,
+    /// Whether this node currently has active (pressed) state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
+    /// Scroll offset [x, y] in CSS pixels, if scrolled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scroll_offset: Option<[f64; 2]>,
     /// Ordered list of child node IDs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<u64>,
@@ -96,12 +105,18 @@ pub struct InspectResponse {
     /// Optional node ID of the currently focused element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused_node_id: Option<u64>,
+    /// Optional node ID of the currently hovered element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hover_node_id: Option<u64>,
+    /// Document viewport scroll offset [x, y] in CSS pixels, if non-zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport_scroll: Option<[f64; 2]>,
     /// Flattened pre-order list of semantic nodes.
     pub nodes: Vec<SemanticNode>,
 }
 
 /// Request to perform an action on a target node in the host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum ActionRequest {
     /// Synthetic click on a node.
@@ -137,6 +152,90 @@ pub enum ActionRequest {
         /// Key name or character to inject (e.g. "Tab", "Enter", "Space", "Backspace", "a").
         key: String,
         /// Modifier keys held during the keypress.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modifiers: Option<KeyModifiers>,
+    },
+    /// Pointer / Mouse move (hover).
+    MouseMove {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        /// Optional target node handle (its center is used if x/y are omitted).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        /// Explicit X coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<f32>,
+        /// Explicit Y coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<f32>,
+        /// Modifier keys held during the move.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modifiers: Option<KeyModifiers>,
+    },
+    /// Pointer / Mouse button press (down).
+    MouseDown {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        /// Optional target node handle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        /// Explicit X coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<f32>,
+        /// Explicit Y coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<f32>,
+        /// Button: "left", "right", "middle" (defaults to "left").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        button: Option<String>,
+        /// Modifier keys held during the press.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modifiers: Option<KeyModifiers>,
+    },
+    /// Pointer / Mouse button release (up).
+    MouseUp {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        /// Optional target node handle.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        /// Explicit X coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<f32>,
+        /// Explicit Y coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<f32>,
+        /// Button: "left", "right", "middle" (defaults to "left").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        button: Option<String>,
+        /// Modifier keys held during the release.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modifiers: Option<KeyModifiers>,
+    },
+    /// Mouse wheel / scroll.
+    Wheel {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        /// Optional target node handle (its center is used if x/y are omitted).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        /// Explicit X coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        x: Option<f32>,
+        /// Explicit Y coordinate in viewport CSS pixels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        y: Option<f32>,
+        /// Horizontal scroll delta in pixels.
+        #[serde(default, alias = "deltaX")]
+        delta_x: f64,
+        /// Vertical scroll delta in pixels.
+        #[serde(default, alias = "deltaY")]
+        delta_y: f64,
+        /// Modifier keys held during the scroll.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         modifiers: Option<KeyModifiers>,
     },
@@ -270,7 +369,7 @@ pub struct CaptureResponse {
 }
 
 /// Top-level control request envelope forwarded across the transport.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum ControlRequest {
     /// Inspect the DOM/semantic tree.
@@ -343,6 +442,9 @@ mod tests {
             text: None,
             bounds: Some([0.0, 0.0, 800.0, 600.0]),
             focused: Some(true),
+            hovered: Some(true),
+            active: Some(false),
+            scroll_offset: Some([0.0, 150.0]),
             children: vec![2, 3],
         };
 
@@ -352,6 +454,8 @@ mod tests {
             node_count: 1,
             current_frame: Some(42),
             focused_node_id: Some(1),
+            hover_node_id: Some(1),
+            viewport_scroll: Some([0.0, 50.0]),
             nodes: vec![node],
         });
 
@@ -450,6 +554,81 @@ mod tests {
         let sentinel_json = serde_json::to_string(&sentinel_req).unwrap();
         let sentinel_parsed: ControlRequest = serde_json::from_str(&sentinel_json).unwrap();
         assert_eq!(sentinel_req, sentinel_parsed);
+
+        // Test Action roundtrip: MouseMove
+        let move_req = ControlRequest::Act(ActionRequest::MouseMove {
+            window_id: None,
+            node_id: Some(102),
+            x: Some(150.0),
+            y: Some(250.0),
+            modifiers: None,
+        });
+        let move_json = serde_json::to_string(&move_req).unwrap();
+        assert!(move_json.contains("\"action\":\"mouseMove\""));
+        assert!(move_json.contains("\"x\":150.0"));
+        let move_parsed: ControlRequest = serde_json::from_str(&move_json).unwrap();
+        assert_eq!(move_req, move_parsed);
+
+        // Test Action roundtrip: MouseDown
+        let down_req = ControlRequest::Act(ActionRequest::MouseDown {
+            window_id: None,
+            node_id: Some(102),
+            x: None,
+            y: None,
+            button: Some("left".into()),
+            modifiers: None,
+        });
+        let down_json = serde_json::to_string(&down_req).unwrap();
+        assert!(down_json.contains("\"action\":\"mouseDown\""));
+        assert!(down_json.contains("\"button\":\"left\""));
+        let down_parsed: ControlRequest = serde_json::from_str(&down_json).unwrap();
+        assert_eq!(down_req, down_parsed);
+
+        // Test Action roundtrip: MouseUp
+        let up_req = ControlRequest::Act(ActionRequest::MouseUp {
+            window_id: None,
+            node_id: Some(102),
+            x: None,
+            y: None,
+            button: Some("left".into()),
+            modifiers: None,
+        });
+        let up_json = serde_json::to_string(&up_req).unwrap();
+        assert!(up_json.contains("\"action\":\"mouseUp\""));
+        let up_parsed: ControlRequest = serde_json::from_str(&up_json).unwrap();
+        assert_eq!(up_req, up_parsed);
+
+        // Test Action roundtrip: Wheel
+        let wheel_req = ControlRequest::Act(ActionRequest::Wheel {
+            window_id: None,
+            node_id: Some(103),
+            x: None,
+            y: None,
+            delta_x: 0.0,
+            delta_y: 50.0,
+            modifiers: None,
+        });
+        let wheel_json = serde_json::to_string(&wheel_req).unwrap();
+        assert!(wheel_json.contains("\"action\":\"wheel\""));
+        assert!(wheel_json.contains("\"delta_y\":50.0"));
+        let wheel_parsed: ControlRequest = serde_json::from_str(&wheel_json).unwrap();
+        assert_eq!(wheel_req, wheel_parsed);
+
+        // Test camelCase alias for deltaX/deltaY
+        let camel_json = r#"{"type":"act","payload":{"action":"wheel","node_id":103,"deltaX":10.0,"deltaY":20.0}}"#;
+        let camel_parsed: ControlRequest = serde_json::from_str(camel_json).unwrap();
+        assert_eq!(
+            camel_parsed,
+            ControlRequest::Act(ActionRequest::Wheel {
+                window_id: None,
+                node_id: Some(103),
+                x: None,
+                y: None,
+                delta_x: 10.0,
+                delta_y: 20.0,
+                modifiers: None,
+            })
+        );
 
         let cap_resp = ControlResponse::CaptureSuccess(CaptureResponse {
             success: true,

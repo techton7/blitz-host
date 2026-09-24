@@ -23,6 +23,11 @@ SUBCOMMANDS:
     focus <NODE_ID> [OPTIONS]       Focus target element (auto-settles)
     set-value <NODE_ID> <VALUE>    Set text value of an input element (auto-settles)
     key <KEY> [OPTIONS]            Dispatch a synthetic key event (auto-settles)
+    move <NODE_ID> [OPTIONS]       Move pointer/mouse to node or coordinates (auto-settles)
+    down <NODE_ID> [OPTIONS]       Press mouse button down on element (auto-settles)
+    up <NODE_ID> [OPTIONS]         Release mouse button on element (auto-settles)
+    wheel <NODE_ID> [OPTIONS]      Dispatch mouse wheel/scroll delta (auto-settles)
+    drag <FROM_ID> <TO_ID>         Execute drag sequence from one node to another (auto-settles)
 
 OPTIONS:
     -h, --help                     Print help information
@@ -269,6 +274,181 @@ EXAMPLES:
     blitz-host key a --meta --node 4294967405
 "#
     );
+}
+
+fn print_move_help() {
+    println!(
+        r#"blitz-host-move: Move mouse / hover pointer over a live Blitz window element or coordinates.
+
+USAGE:
+    blitz-host move [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    [NODE_ID]                Target node integer ID (e.g. 4294967402). If provided, cursor moves to node center.
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --x <X>              Explicit X coordinate in CSS pixels
+        --y <Y>              Explicit Y coordinate in CSS pixels
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+EXAMPLES:
+    blitz-host move 4294967402
+    blitz-host move --x 150 --y 200
+    blitz-host move 4294967402 --pid 37462
+"#
+    );
+}
+
+fn print_down_help() {
+    println!(
+        r#"blitz-host-down: Press mouse button down on a live Blitz window element or coordinates.
+
+USAGE:
+    blitz-host down [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    [NODE_ID]                Target node integer ID (e.g. 4294967402)
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --button <BUTTON>    Mouse button: left, right, middle (default: left)
+        --x <X>              Explicit X coordinate in CSS pixels
+        --y <Y>              Explicit Y coordinate in CSS pixels
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+EXAMPLES:
+    blitz-host down 4294967402
+    blitz-host down 4294967402 --button right
+"#
+    );
+}
+
+fn print_up_help() {
+    println!(
+        r#"blitz-host-up: Release mouse button on a live Blitz window element or coordinates.
+
+USAGE:
+    blitz-host up [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    [NODE_ID]                Target node integer ID (e.g. 4294967402)
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --button <BUTTON>    Mouse button: left, right, middle (default: left)
+        --x <X>              Explicit X coordinate in CSS pixels
+        --y <Y>              Explicit Y coordinate in CSS pixels
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+EXAMPLES:
+    blitz-host up 4294967402
+"#
+    );
+}
+
+fn print_wheel_help() {
+    println!(
+        r#"blitz-host-wheel: Dispatch mouse wheel / scroll delta on a live Blitz window element.
+
+USAGE:
+    blitz-host wheel [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    [NODE_ID]                Target node integer ID (optional, scrolls target element or hover target)
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --dy <DY>            Vertical scroll delta in pixels (e.g. 50, -50)
+        --dx <DX>            Horizontal scroll delta in pixels (default: 0)
+        --x <X>              Explicit X coordinate in CSS pixels
+        --y <Y>              Explicit Y coordinate in CSS pixels
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+EXAMPLES:
+    blitz-host wheel 4294967402 --dy 50
+    blitz-host wheel 4294967402 --dy -30 --pid 37462
+"#
+    );
+}
+
+fn print_drag_help() {
+    println!(
+        r#"blitz-host-drag: Execute drag sequence from one node to another (down -> move -> up).
+
+USAGE:
+    blitz-host drag <FROM_NODE_ID> <TO_NODE_ID> [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    <FROM_NODE_ID>           Source node integer ID to start drag from
+    <TO_NODE_ID>             Destination node integer ID to drop onto
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+EXAMPLES:
+    blitz-host drag 4294967402 4294967410
+"#
+    );
+}
+
+fn parse_coords_arg(args: &[String]) -> (Option<f32>, Option<f32>) {
+    let mut x = None;
+    let mut y = None;
+    for i in 0..args.len() {
+        if args[i] == "--x" && i + 1 < args.len() {
+            x = args[i + 1].parse().ok();
+        } else if let Some(rest) = args[i].strip_prefix("--x=") {
+            x = rest.parse().ok();
+        }
+        if args[i] == "--y" && i + 1 < args.len() {
+            y = args[i + 1].parse().ok();
+        } else if let Some(rest) = args[i].strip_prefix("--y=") {
+            y = rest.parse().ok();
+        }
+    }
+    (x, y)
+}
+
+fn parse_button_arg(args: &[String]) -> Option<String> {
+    for i in 0..args.len() {
+        if args[i] == "--button" && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
+        }
+        if let Some(rest) = args[i].strip_prefix("--button=") {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+fn parse_delta_args(args: &[String]) -> (f64, f64) {
+    let mut dx = 0.0f64;
+    let mut dy = 0.0f64;
+    for i in 0..args.len() {
+        if (args[i] == "--dx" || args[i] == "--delta-x") && i + 1 < args.len() {
+            dx = args[i + 1].parse().unwrap_or(0.0);
+        } else if let Some(rest) = args[i].strip_prefix("--dx=").or_else(|| args[i].strip_prefix("--delta-x=")) {
+            dx = rest.parse().unwrap_or(0.0);
+        }
+        if (args[i] == "--dy" || args[i] == "--delta-y") && i + 1 < args.len() {
+            dy = args[i + 1].parse().unwrap_or(0.0);
+        } else if let Some(rest) = args[i].strip_prefix("--dy=").or_else(|| args[i].strip_prefix("--delta-y=")) {
+            dy = rest.parse().unwrap_or(0.0);
+        }
+    }
+    (dx, dy)
 }
 
 fn parse_pid_arg(args: &[String]) -> Option<u32> {
@@ -869,6 +1049,458 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("=================================================================");
             println!("[blitz-host] Key action completed and settled successfully!");
+            Ok(())
+        }
+        "move" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_move_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--x=")
+                    || arg.starts_with("--y=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let node_id = if !positional.is_empty() {
+                match positional[0].parse::<u64>() {
+                    Ok(id) => Some(id),
+                    Err(_) => {
+                        eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
+            let (cx, cy) = parse_coords_arg(subargs);
+            let coords = match (cx, cy) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+
+            if node_id.is_none() && coords.is_none() {
+                eprintln!("Error: 'move' requires either a target <NODE_ID> or coordinates (--x and --y).");
+                eprintln!("Run 'blitz-host move --help' for usage.");
+                std::process::exit(1);
+            }
+
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching pointer move (node: {:?}, coords: {:?}) (PID: {})...",
+                node_id,
+                coords,
+                client.descriptor().pid
+            );
+            let act_res = client.mouse_move(window_id, node_id, coords, None)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            // Auto-settle 2 frames to ensure DOM and layout mutation settled
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Pointer move action completed and settled successfully!");
+            Ok(())
+        }
+        "down" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_down_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" || arg == "--button" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--x=")
+                    || arg.starts_with("--y=")
+                    || arg.starts_with("--button=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let node_id = if !positional.is_empty() {
+                match positional[0].parse::<u64>() {
+                    Ok(id) => Some(id),
+                    Err(_) => {
+                        eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
+            let (cx, cy) = parse_coords_arg(subargs);
+            let coords = match (cx, cy) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+
+            let button = parse_button_arg(subargs);
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching pointer down (node: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
+                node_id,
+                coords,
+                button,
+                client.descriptor().pid
+            );
+            let act_res = client.mouse_down(window_id, node_id, coords, button.as_deref(), None)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Pointer down action completed and settled successfully!");
+            Ok(())
+        }
+        "up" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_up_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" || arg == "--button" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--x=")
+                    || arg.starts_with("--y=")
+                    || arg.starts_with("--button=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let node_id = if !positional.is_empty() {
+                match positional[0].parse::<u64>() {
+                    Ok(id) => Some(id),
+                    Err(_) => {
+                        eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
+            let (cx, cy) = parse_coords_arg(subargs);
+            let coords = match (cx, cy) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+
+            let button = parse_button_arg(subargs);
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching pointer up (node: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
+                node_id,
+                coords,
+                button,
+                client.descriptor().pid
+            );
+            let act_res = client.mouse_up(window_id, node_id, coords, button.as_deref(), None)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Pointer up action completed and settled successfully!");
+            Ok(())
+        }
+        "wheel" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_wheel_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" || arg == "--x" || arg == "--y" || arg == "--dx" || arg == "--delta-x" || arg == "--dy" || arg == "--delta-y" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with("--x=")
+                    || arg.starts_with("--y=")
+                    || arg.starts_with("--dx=")
+                    || arg.starts_with("--delta-x=")
+                    || arg.starts_with("--dy=")
+                    || arg.starts_with("--delta-y=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let node_id = if !positional.is_empty() {
+                match positional[0].parse::<u64>() {
+                    Ok(id) => Some(id),
+                    Err(_) => {
+                        eprintln!("Error: Invalid <NODE_ID> '{}'. Must be an integer.", positional[0]);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                None
+            };
+
+            let (cx, cy) = parse_coords_arg(subargs);
+            let coords = match (cx, cy) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+
+            let (dx, dy) = parse_delta_args(subargs);
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Dispatching wheel delta (dx: {}, dy: {}, node: {:?}, coords: {:?}) (PID: {})...",
+                dx,
+                dy,
+                node_id,
+                coords,
+                client.descriptor().pid
+            );
+            let act_res = client.wheel(window_id, node_id, coords, dx, dy, None)?;
+            println!(
+                "  • Act response: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Wheel action completed and settled successfully!");
+            Ok(())
+        }
+        "drag" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_drag_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid" || arg == "--window" || arg == "--window-id" {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with('-')
+                {
+                    continue;
+                }
+                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            if positional.len() < 2 {
+                eprintln!("Error: 'drag' requires <FROM_NODE_ID> and <TO_NODE_ID> arguments.");
+                eprintln!("Run 'blitz-host drag --help' for usage.");
+                std::process::exit(1);
+            }
+
+            let from_id: u64 = match positional[0].parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    eprintln!("Error: Invalid <FROM_NODE_ID> '{}'. Must be an integer.", positional[0]);
+                    std::process::exit(1);
+                }
+            };
+
+            let to_id: u64 = match positional[1].parse() {
+                Ok(id) => id,
+                Err(_) => {
+                    eprintln!("Error: Invalid <TO_NODE_ID> '{}'. Must be an integer.", positional[1]);
+                    std::process::exit(1);
+                }
+            };
+
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+
+            let mut client = match DebugClient::connect_target(&selector) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error connecting to Blitz host: {e}");
+                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
+                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                    std::process::exit(1);
+                }
+            };
+
+            println!(
+                "Executing drag sequence from #{} to #{} (PID: {})...",
+                from_id,
+                to_id,
+                client.descriptor().pid
+            );
+            let act_res = client.drag(from_id, to_id)?;
+            println!(
+                "  • Drag completed: success={}, message={:?}",
+                act_res.success, act_res.message
+            );
+
+            println!("Synchronizing 2 VSync frames on live window...");
+            let settle_res = client.settle_window(window_id, 2)?;
+            println!(
+                "  • Settle response: settled={}, current_frame={}",
+                settle_res.settled, settle_res.current_frame
+            );
+            println!("=================================================================");
+            println!("[blitz-host] Drag sequence completed and settled successfully!");
             Ok(())
         }
         unknown => {
