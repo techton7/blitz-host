@@ -1,4 +1,4 @@
-# Worker Instruction: Fix and Finish the Core Mouse / Pointer / Wheel Lane Truthfully
+# Worker Instruction: Add the First `subtree / node-level capture` Lane via Crop-Based Capture
 
 You are working in:
 
@@ -6,9 +6,19 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The previous pass moved the pointer/wheel lane in the right direction, but it is **not complete yet** because the live native E2E proof is currently failing.
+The current stack already proves:
 
-This pass must first restore a truthful green baseline and then finish the slice.
+1. attach
+2. inspect
+3. click / focus / set-value
+4. bounded keyboard lane
+5. core mouse / pointer / wheel lane
+6. full-window capture
+7. process targeting
+
+The next visual refinement is now fixed:
+
+> **add the first `subtree / node-level capture` lane**
 
 Write all agent-facing reasoning in English.
 
@@ -25,129 +35,147 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Finish the current core mouse / pointer / wheel slice **for real**.
+Implement the first useful `node` / `subtree` visual capture lane.
+
+The intended first version should be:
+
+1. inspect-selected node
+2. capture the full rendered surface
+3. crop the image to the node’s visual bounds
+4. return or write the cropped image as the proof artifact
+
+This is the right first step because it gives strong local visual proof without requiring a larger renderer redesign.
+
+---
+
+## 2. Preferred Implementation Strategy
+
+Use the current working seams.
+
+### Preferred v1 approach
+
+> **full capture + node-bounds crop**
 
 That means:
 
-1. identify and fix the current hover-proof mismatch
-2. make the implementation and the proof expectations agree
-3. rerun the full `blitz-host` suite honestly
-4. only then report completion
+1. reuse the current full-window/document capture pipeline
+2. resolve node bounds from the existing inspect/layout data
+3. crop the rendered image to the selected node rect
+4. emit that crop as the result
 
-The immediate problem is not “which future pointer features to add.”
+This is preferred over attempting a full “true subtree render” in the first pass.
 
-The immediate problem is:
+### Important note
 
-> the current live pointer proof is failing, so the result text is ahead of reality.
+Do **not** add new external repo dependencies just to do this first slice if the current code already has what is needed.
 
----
-
-## 2. Known Current Failure
-
-At the time of this instruction, the following command does **not** pass cleanly:
-
-```bash
-cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture
-```
-
-The concrete observed failure is in the live native E2E hover proof:
-
-1. target node (`#mouse-test-card`) had one ID
-2. `InspectResponse.hover_node_id` returned a different node ID
-3. the test panicked because its assertion expected the hover target to be the card itself or a narrowly-defined child
-
-You must treat this as a real failing state.
-
-Do not report success until it is fixed and the full suite passes.
+You may refer to prior reference work for ideas, but the implementation should stand on the current local seams unless a hard blocker appears.
 
 ---
 
-## 3. The Real Design Question You Must Resolve
+## 3. Scope Boundary
 
-You must make the implementation and the proof model agree on what “hover target” means.
+### Must implement
 
-Possible outcomes include:
+1. requesting capture for a specific node/subtree
+2. bounds-based crop of the current rendered surface
+3. live proof that the resulting artifact corresponds to the selected node
 
-1. **the implementation is right and the test expectation is wrong**
-   - for example, the true hover hit target is a deeper descendant than the test allowed
-2. **the implementation is publishing the wrong hover identity**
-   - for example, the inspect surface should be reporting a different node identity or additional context
-3. **the inspect surface needs a clearer contract**
-   - for example, some distinction between directly hit node vs. logical/semantic hover container
+### Explicitly defer
 
-Pick the correct one from source/runtime evidence and align the code/tests/result accordingly.
+Do **not** expand into:
 
----
+1. full subtree-aware renderer specialization
+2. visual diff engines
+3. video / streaming capture
+4. arbitrary region selection unrelated to inspect-selected nodes
 
-## 4. Scope of This Pass
+Keep it to:
 
-### Must do
-
-1. repair the current failing hover proof
-2. ensure the pointer/wheel surface is internally consistent
-3. rerun the tests and live proof honestly
-4. correct any overclaim in `result.md`
-
-### May do
-
-If fixing the hover mismatch reveals small adjacent consistency issues caused by the same change, fix those too.
-
-### Must not do
-
-1. do not jump to another new feature slice
-2. do not weaken the proof by making the test meaningless
-3. do not hide the issue with vague wording
-
-This is a “make the current mouse lane true” pass.
+> inspect-selected node/subtree crop
 
 ---
 
-## 5. Required Truthfulness Standard
+## 4. Suggested Surface
 
-You must align:
+The exact type shape is up to you, but a reasonable direction is:
 
-1. protocol meaning
-2. inspection output
-3. bridge/runtime behavior
-4. live test expectations
-5. result narrative
+1. extend `CaptureRequest` with `node_id: Option<u64>`
+2. when `node_id` is `None`, preserve current full-window capture behavior
+3. when `node_id` is `Some(id)`, capture full surface and crop to the node’s bounds
 
-If the implementation returns one identity while the proof assumes a different identity, you must resolve that mismatch explicitly.
-
-Do not simply declare the current behavior “good enough” without deciding what the hover contract actually is.
+If a node’s bounds are missing or invalid, report that honestly instead of silently pretending capture succeeded.
 
 ---
 
-## 6. Files / Areas to Reinspect
+## 5. Required Proof Targets
+
+You must prove that the cropped image meaningfully corresponds to the selected node.
+
+Good proof targets include:
+
+1. `#test-interaction-button`
+2. `#test-input`
+3. `#mouse-test-card`
+4. another visually distinct element already used in the canonical example / harness
+
+The proof should demonstrate:
+
+1. inspect finds the node and its bounds
+2. capture with `node_id` produces a smaller crop than the full window where appropriate
+3. the crop dimensions match or correspond to the node bounds
+4. the image artifact is valid and non-empty
+
+If possible, use an element with distinctive styling so the crop is clearly meaningful.
+
+---
+
+## 6. Honesty Constraints
+
+You must be explicit about what this first capture lane really is.
+
+If it is:
+
+> **full-scene render followed by crop**
+
+say that plainly.
+
+Do **not** describe it as if the renderer is doing a native node-only render pass unless that is actually true.
+
+This matters because the implementation strategy is acceptable — but only if reported honestly.
+
+---
+
+## 7. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/src/inspect.rs`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/tests/live_inspect.rs`
-5. any pointer dispatch code in `dioxus-native-dom` or related native event plumbing
-6. any example/harness UI elements used as pointer proof targets
+2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+6. current capture code and current inspect/bounds code
+7. canonical `cross_host` example and/or `oxidase-native-runner` for proof targets
 
 ---
 
-## 7. Validation You Must Run
+## 8. Validation You Must Run
 
-Run the same command that is currently known to fail and make it pass honestly:
+Run the smallest commands that honestly prove the slice.
 
-```bash
-cargo test --manifest-path /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/Cargo.toml -- --nocapture
-```
+At minimum:
 
-Also rerun any additional targeted commands needed to justify the final hover/pointer contract.
-
-Do not call this complete until the full `blitz-host` suite is green again.
+1. the relevant `blitz-host` tests after changing capture surfaces
+2. at least one live native proof against a running host
+3. verification that the cropped artifact is valid and non-empty
+4. confirmation that the existing full-window capture still works
 
 If markdown files are edited, validate them.
 
 ---
 
-## 8. `result.md` Requirement
+## 9. `result.md` Requirement
 
 Update:
 
@@ -155,22 +183,22 @@ Update:
 
 It must explicitly record:
 
-1. what the hover mismatch actually was
-2. whether the implementation or the proof expectation changed
-3. what the final hover contract is
-4. what validation now passes
-5. what remains deferred
+1. what request surface changed
+2. whether the implementation is crop-based or true subtree render
+3. how node bounds are resolved
+4. what live proof was observed
+5. what still remains deferred
 
 ---
 
-## 9. Final Verdict Rule
+## 10. Final Verdict Rule
 
 You may report **Implemented and proven** only if:
 
-1. the full `blitz-host` suite is green again
-2. the hover/pointer contract is explicit and internally consistent
-3. the result text no longer overclaims
-4. the mouse / pointer / wheel lane proof is real
+1. node-level capture really exists
+2. it is proven against a live native host
+3. the implementation scope is described honestly
+4. full-window capture and existing control-plane features still work
 
 Otherwise report:
 
@@ -180,4 +208,4 @@ or
 
 The purpose of this pass is:
 
-> make the current pointer/wheel slice actually true in code, tests, and explanation before moving on.
+> connect inspect-selected nodes to local visual proof through the smallest honest node/subtree capture implementation.

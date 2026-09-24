@@ -346,15 +346,40 @@ impl DebugClient {
         self.capture_window(None)
     }
 
-    /// Capture visual screenshot of the document/window on a targeted window (or primary if None).
-    pub fn capture_window(&mut self, window_id: Option<u64>) -> io::Result<CaptureResponse> {
-        match self.send_request(ControlRequest::Capture(CaptureRequest { window_id }))? {
+    /// Capture visual screenshot with explicit [`CaptureRequest`] parameters.
+    pub fn capture_request(&mut self, request: CaptureRequest) -> io::Result<CaptureResponse> {
+        match self.send_request(ControlRequest::Capture(request))? {
             ControlResponse::CaptureSuccess(cap_resp) => Ok(cap_resp),
             ControlResponse::Error(err) => Err(io::Error::other(err)),
             other => Err(io::Error::other(format!(
                 "Unexpected response variant for capture: {other:?}"
             ))),
         }
+    }
+
+    /// Capture visual screenshot of the document/window on a targeted window (or primary if None).
+    pub fn capture_window(&mut self, window_id: Option<u64>) -> io::Result<CaptureResponse> {
+        self.capture_request(CaptureRequest {
+            window_id,
+            node_id: None,
+        })
+    }
+
+    /// Capture visual screenshot cropped to a specific target node's visual bounds.
+    pub fn capture_node(&mut self, node_id: u64) -> io::Result<CaptureResponse> {
+        self.capture_request(CaptureRequest {
+            window_id: None,
+            node_id: Some(node_id),
+        })
+    }
+
+    /// Capture visual screenshot of a specific node on a targeted window.
+    pub fn capture_window_node(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: Option<u64>,
+    ) -> io::Result<CaptureResponse> {
+        self.capture_request(CaptureRequest { window_id, node_id })
     }
 
     /// Capture visual screenshot and decode into raw PNG image bytes.
@@ -378,6 +403,34 @@ impl DebugClient {
         if !resp.success {
             return Err(io::Error::other(
                 resp.message.unwrap_or_else(|| "Capture failed without message".into()),
+            ));
+        }
+        let png_bytes = BASE64_STANDARD
+            .decode(&resp.data_base64)
+            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))?;
+
+        let target_path = path.as_ref().to_path_buf();
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&target_path, &png_bytes)?;
+
+        Ok((resp.width, resp.height, target_path))
+    }
+
+    /// Capture visual screenshot of a specific node and write directly to `path`.
+    ///
+    /// Returns `(width, height, path)` on success.
+    pub fn capture_node_to_file(
+        &mut self,
+        node_id: u64,
+        path: impl AsRef<Path>,
+    ) -> io::Result<(u32, u32, PathBuf)> {
+        let resp = self.capture_node(node_id)?;
+        if !resp.success {
+            return Err(io::Error::other(
+                resp.message
+                    .unwrap_or_else(|| format!("Capture of node #{node_id} failed without message")),
             ));
         }
         let png_bytes = BASE64_STANDARD

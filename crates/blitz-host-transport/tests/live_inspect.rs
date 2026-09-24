@@ -627,11 +627,61 @@ fn test_live_native_runner_attach_and_inspect() {
     println!("  • Live proof PNG size: {} bytes", file_size);
     assert!(file_size > 100, "captured PNG file size must be substantial");
 
+    // =========================================================================
+    // STEP 12: Subtree / Node-Level Visual Capture Proof (Cropped PNG)
+    // =========================================================================
+    println!("Testing subtree / node-level visual capture on #mouse-test-card (node #{})...", card_id);
+    let node_cap_resp = client.capture_node(card_id).expect("node capture request failed");
+    println!(
+        "Node Capture Response: success={}, dimensions={}x{}, format={:?}, base64_len={}, node_id={:?}",
+        node_cap_resp.success, node_cap_resp.width, node_cap_resp.height, node_cap_resp.format,
+        node_cap_resp.data_base64.len(), node_cap_resp.node_id
+    );
+    assert!(node_cap_resp.success, "node capture response must indicate success");
+    assert_eq!(node_cap_resp.node_id, Some(card_id), "response node_id must match requested node");
+    assert!(node_cap_resp.width > 0, "cropped width must be greater than zero");
+    assert!(node_cap_resp.height > 0, "cropped height must be greater than zero");
+    assert!(
+        node_cap_resp.width < cap_resp.width,
+        "CRITICAL PROOF: cropped node width ({}) must be strictly smaller than full-window width ({})",
+        node_cap_resp.width, cap_resp.width
+    );
+    assert!(
+        node_cap_resp.height < cap_resp.height,
+        "CRITICAL PROOF: cropped node height ({}) must be strictly smaller than full-window height ({})",
+        node_cap_resp.height, cap_resp.height
+    );
+
+    // Test capture_node_to_file
+    let node_artifact_path = std::path::PathBuf::from("target/live_proof_node_card.png");
+    let (nw, nh, node_saved_path) = client
+        .capture_node_to_file(card_id, &node_artifact_path)
+        .expect("capture_node_to_file must succeed");
+    println!("  • Wrote cropped visual proof PNG to {} ({}x{})", node_saved_path.display(), nw, nh);
+    assert!(node_saved_path.exists());
+    let node_file_size = std::fs::metadata(&node_saved_path).unwrap().len();
+    println!("  • Cropped proof PNG size: {} bytes", node_file_size);
+    assert!(node_file_size > 100, "cropped PNG file size must be non-empty");
+
+    // Also test node capture on #test-interaction-button
+    println!("Testing node-level visual capture on #test-interaction-button (node #{})...", button_id);
+    let btn_cap_resp = client.capture_node(button_id).expect("button capture failed");
+    assert!(btn_cap_resp.success);
+    assert_eq!(btn_cap_resp.node_id, Some(button_id));
+    assert!(btn_cap_resp.width < cap_resp.width);
+    assert!(btn_cap_resp.height < cap_resp.height);
+
+    // Test capture on non-existent node reports honest failure
+    println!("Testing node-level visual capture on non-existent node #9999999...");
+    let invalid_cap_resp = client.capture_node(9999999).expect("request must succeed over IPC");
+    assert!(!invalid_cap_resp.success, "capture on non-existent node must report success=false");
+    assert!(invalid_cap_resp.message.as_deref().unwrap().contains("not found in document"));
+
     // Terminate child process cleanly
     let _ = child.kill();
     let _ = child.wait();
 
     println!("=================================================================");
-    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, CAPTURE PROOF PASSED 100%!");
+    println!("LIVE ATTACH, CLICK, FOCUS, SET_VALUE, SUBTREE CAPTURE PROOF PASSED 100%!");
     println!("=================================================================");
 }

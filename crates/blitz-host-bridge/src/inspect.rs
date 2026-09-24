@@ -55,9 +55,10 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         let bounds = match &node.data {
             NodeData::Element(_) | NodeData::AnonymousBlock(_) | NodeData::Document(_) => {
                 let layout = node.final_layout();
+                let pos = node.absolute_position(0.0, 0.0);
                 Some([
-                    layout.location.x,
-                    layout.location.y,
+                    pos.x,
+                    pos.y,
                     layout.size.width,
                     layout.size.height,
                 ])

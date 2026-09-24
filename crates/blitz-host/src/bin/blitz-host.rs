@@ -67,26 +67,31 @@ fn print_capture_help() {
         r#"blitz-host-capture: Capture live rendered visual screenshot (PNG).
 
 USAGE:
-    blitz-host capture [OPTIONS] [DESCRIPTOR_PATH]
+    blitz-host capture [NODE_ID] [OPTIONS] [DESCRIPTOR_PATH]
 
 OPTIONS:
-        --pid <PID>          Target specific host process by OS process ID
-    -o, --output <PATH>      Output PNG file path (defaults to blitz-capture-<PID>.png)
-        --json               Output capture response as JSON with base64 data
-    -h, --help               Print help information
+    --node, -n <NODE_ID> Target specific node/subtree to crop capture
+        --pid <PID>      Target specific host process by OS process ID
+    -o, --output <PATH>  Output PNG file path (defaults to blitz-capture-<PID>.png or blitz-capture-<PID>-node-<NODE_ID>.png)
+        --json           Output capture response as JSON with base64 data
+    -h, --help           Print help information
 
 ARGUMENTS:
-    [DESCRIPTOR_PATH]        Path to host descriptor JSON file or UDS socket.
-                             If omitted, auto-discovers the active running Blitz window.
+    [NODE_ID]            Optional target node ID to crop capture to its visual bounds.
+    [DESCRIPTOR_PATH]    Path to host descriptor JSON file or UDS socket.
+                         If omitted, auto-discovers the active running Blitz window.
 
 EXAMPLES:
-    # 1. Capture visual screenshot and save to default file (blitz-capture-<PID>.png)
+    # 1. Capture full window screenshot and save to default file (blitz-capture-<PID>.png)
     blitz-host capture
 
-    # 2. Capture and save to explicit file path
-    blitz-host capture -o screenshot.png --pid 37462
+    # 2. Capture specific element/subtree and crop to its bounds
+    blitz-host capture 4294967464
 
-    # 3. Output capture response as JSON
+    # 3. Capture specific node and save to explicit file path
+    blitz-host capture 4294967464 -o card.png --pid 37462
+
+    # 4. Output capture response as JSON
     blitz-host capture --json --pid 37462
 "#
     );
@@ -694,6 +699,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let output_path = parse_output_arg(subargs);
             let selector = determine_selector(subargs);
 
+            // Extract optional node_id from `--node <ID>` or positional argument
+            let node_id = subargs
+                .iter()
+                .position(|a| a == "--node" || a == "-n")
+                .and_then(|idx| subargs.get(idx + 1))
+                .and_then(|val| val.parse::<u64>().ok())
+                .or_else(|| {
+                    subargs
+                        .iter()
+                        .find(|a| !a.starts_with('-') && !a.ends_with(".sock") && !a.ends_with(".json"))
+                        .and_then(|val| val.parse::<u64>().ok())
+                });
+
             let mut client = match DebugClient::connect_target(&selector) {
                 Ok(c) => c,
                 Err(err) => {
@@ -705,7 +723,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let pid = client.descriptor().pid;
-            let resp = match client.capture() {
+            let resp = match node_id {
+                Some(nid) => client.capture_node(nid),
+                None => client.capture(),
+            };
+
+            let resp = match resp {
                 Ok(r) => r,
                 Err(err) => {
                     eprintln!("Error capturing visual screenshot: {err}");
@@ -736,7 +759,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let target_file = output_path.unwrap_or_else(|| {
-                PathBuf::from(format!("blitz-capture-{pid}.png"))
+                if let Some(nid) = resp.node_id.or(node_id) {
+                    PathBuf::from(format!("blitz-capture-{pid}-node-{nid}.png"))
+                } else {
+                    PathBuf::from(format!("blitz-capture-{pid}.png"))
+                }
             });
 
             if let Some(parent) = target_file.parent() {
@@ -747,9 +774,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::write(&target_file, &png_bytes)?;
 
             println!("=================================================================");
-            println!("[blitz-host] Visual Screenshot Captured");
+            if let Some(nid) = resp.node_id.or(node_id) {
+                println!("[blitz-host] Subtree / Node Screenshot Captured (Node #{nid})");
+            } else {
+                println!("[blitz-host] Full Window Screenshot Captured");
+            }
             println!("=================================================================");
             println!("  • Process PID : {}", pid);
+            if let Some(nid) = resp.node_id.or(node_id) {
+                println!("  • Target Node : #{}", nid);
+            }
             println!("  • Resolution  : {}x{} physical pixels", resp.width, resp.height);
             println!("  • Format      : {}", resp.format.to_uppercase());
             println!("  • Size        : {} bytes", png_bytes.len());

@@ -8,7 +8,7 @@ pub mod capture;
 pub mod inspect;
 
 pub use bridge::HostBridge;
-pub use capture::{capture_document, capture_document_png};
+pub use capture::{capture_document, capture_document_node_png, capture_document_png};
 pub use inspect::inspect_document;
 
 #[cfg(test)]
@@ -87,7 +87,7 @@ mod tests {
         assert!(png_bytes.len() > 8);
         assert_eq!(&png_bytes[0..4], &[0x89, b'P', b'N', b'G'], "must start with PNG magic bytes");
 
-        // Test IPC bridge routing
+        // Test IPC bridge routing for full window capture
         let (tx, rx) = channel::<ControlBridgeRequest>();
         let mut bridge = HostBridge::new(rx);
 
@@ -109,11 +109,36 @@ mod tests {
                 assert_eq!(cap.format, "png");
                 assert_eq!(cap.width, width);
                 assert_eq!(cap.height, height);
+                assert_eq!(cap.node_id, None);
                 use base64::prelude::*;
                 let decoded = BASE64_STANDARD.decode(&cap.data_base64).unwrap();
                 assert_eq!(decoded, png_bytes);
             }
             other => panic!("expected CaptureSuccess, got {other:?}"),
+        }
+
+        // Test IPC bridge routing for node-level capture (non-existent node should fail gracefully)
+        let (node_resp_tx, node_resp_rx) = sync_channel(1);
+        tx.send(ControlBridgeRequest {
+            request: ControlRequest::Capture(CaptureRequest {
+                window_id: None,
+                node_id: Some(999999),
+            }),
+            reply: node_resp_tx,
+        }).unwrap();
+
+        let serviced2 = bridge.poll_and_service_with(&mut doc, 1, |_, _| {
+            Err("no actions".into())
+        });
+        assert_eq!(serviced2, 1);
+
+        let resp2 = node_resp_rx.recv().unwrap();
+        match resp2 {
+            ControlResponse::CaptureSuccess(cap) => {
+                assert!(!cap.success, "capture of non-existent node must report failure");
+                assert!(cap.message.unwrap().contains("not found in document"));
+            }
+            other => panic!("expected CaptureSuccess with failure status, got {other:?}"),
         }
     }
 }

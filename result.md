@@ -236,4 +236,57 @@ Per `instruction.md` Section 3 and the approved implementation plan:
 1. **Full Gesture Language**: Multi-touch pinch-to-zoom, rotation, and multi-finger pan gestures remain deferred.
 2. **Touch / Multi-Touch Event Complexities**: Touch identifiers and multi-touch tracking remain deferred.
 3. **Advanced Pointer Capture Semantics**: Explicit W3C `setPointerCapture` / `releasePointerCapture` APIs are deferred.
-4. **Subtree / Node-Level Visual Capture Crop**: Full window capture is proven (PNG); node-level subtree visual crop is the next priority lane per `ROADMAP.md`.
+4. **Isolated Subtree Scene Specialization**: Isolated node-only rendering without scene context (current implementation uses crop-based capture to preserve real visual styling and background context).
+5. **Perceptual Visual Diff Engine**: Automatic image comparison (`image-compare`/`dssim`) remains a client/harness responsibility rather than host bridge code.
+
+---
+
+## 8. Subtree / Node-Level Visual Capture (Crop-Based Capture)
+
+### 8.1 What Request Surface Changed
+1. **`CaptureRequest` (`crates/blitz-host-protocol`)**:
+   - Added `pub node_id: Option<u64>` (with `#[serde(default, skip_serializing_if = "Option::is_none")]`).
+   - When `node_id` is `None`, executes full-window capture (`800x600`).
+   - When `node_id` is `Some(id)`, executes crop-based capture to the target node's visual bounds.
+2. **`CaptureResponse` (`crates/blitz-host-protocol`)**:
+   - Added `pub node_id: Option<u64>` publishing the target node ID that was cropped.
+3. **`DebugClient` (`crates/blitz-host-transport`)**:
+   - Added `client.capture_node(node_id: u64) -> io::Result<CaptureResponse>`.
+   - Added `client.capture_window_node(window_id, node_id) -> io::Result<CaptureResponse>`.
+   - Added `client.capture_node_to_file(node_id, path) -> io::Result<(u32, u32, PathBuf)>`.
+4. **CLI Surface (`crates/blitz-host`)**:
+   - Added `blitz-host capture [NODE_ID] [--node <ID>] [-o OUTPUT] [--pid PID] [--json]`.
+   - Default filename for node captures: `blitz-capture-<PID>-node-<NODE_ID>.png`.
+
+### 8.2 Crop-Based vs. True Subtree Render
+Per `instruction.md` Section 6, this is explicitly a **crop-based capture (`full-scene render followed by crop`)**:
+- The document's live scene graph is rasterized into an RGBA pixel buffer using `blitz_paint::paint_scene` and `anyrender_vello_cpu::VelloCpuImageRenderer`.
+- When `node_id` is specified, the node's document-relative bounding box is extracted and scaled by the viewport display scale factor.
+- A 2D rectangular slice of RGBA pixels corresponding to the node is extracted row-by-row and compressed into PNG bytes using `png::Encoder`.
+- **Why this is preferred**: It preserves true on-screen visual reality (actual parent background color, CSS inheritance, text anti-aliasing, and drop shadows) without synthetic rendering isolation or heavy external dependencies.
+
+### 8.3 Node Bounds Resolution and Coordinate Mapping
+- Target node lookup: `doc.get_node(NodeId::from_u64(node_id))`.
+- Document-relative position: `node.absolute_position(0.0, 0.0)` recursively accumulates parent layout locations and subtracts layout scroll offsets.
+- Element dimensions: `node.final_layout().size` provides computed width and height in CSS points.
+- Physical pixel scaling: `(pos.x * scale, pos.y * scale, size.width * scale, size.height * scale)` maps directly to the RGBA buffer coordinates.
+- Bounds clamping: Coordinates are clamped to the physical viewport bounds `[0..width, 0..height]`.
+- Honest error reporting: If a node has non-positive dimensions or lies completely outside the viewport, an honest error `Err("Target node #... has no visible pixels in viewport...")` is returned rather than returning an empty or fake artifact.
+
+### 8.4 Live Native Proof & Visual Artifact Verification
+1. **Full-Window vs. Node Crop Verification (`crates/blitz-host-transport/tests/live_inspect.rs`)**:
+   - Full-window capture produced `800x600` PNG (146,723 bytes).
+   - Node capture on `#mouse-test-card` (node `#4294967464`) produced `618x40` PNG (7,443 bytes).
+   - Assertions proved:
+     - `node_cap_resp.success == true`
+     - `node_cap_resp.node_id == Some(4294967464)`
+     - `node_cap_resp.width < cap_resp.width` (618 < 800)
+     - `node_cap_resp.height < cap_resp.height` (40 < 600)
+     - File on disk: `target/live_proof_node_card.png` verified via `file`: `PNG image data, 618 x 40, 8-bit/color RGBA, non-interlaced`.
+2. **Distinct Proof Target**:
+   - Node capture on `#test-interaction-button` verified clean crop.
+3. **Invalid Node Target**:
+   - Node capture on `#9999999` reported `success == false` with message `"Target node #9999999 not found in document"`.
+4. **Non-Regressing Baseline**:
+   - Full workspace test suite passes `ok. 7 passed; 0 failed`.
+   - Headless semantics suite passes `ok. 3 passed; 0 failed`.

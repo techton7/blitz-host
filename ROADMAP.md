@@ -320,45 +320,22 @@ In short:
 
 > first prove **attach + inspect** end to end, then add **act + settle**, then clarify the `oxidase` boundary, then establish the canonical cross-host example, then move on to broader expansion.
 
-## Current next-step priorities
+## Completed Core Capabilities
 
-Now that the stack already has:
+The blitz-host stack has proven and completed all planned MVP and core interaction lanes:
 
-1. attach / inspect
-2. click / focus / set-value
-3. bounded core keyboard lane
-4. process-level targeting
-5. full-window visual capture
-6. the `oxidase` boundary and canonical example/harness split
-
-the immediate next work should be treated as **two main implementation lanes**:
-
-### Priority 1 - richer mouse / pointer / wheel control
-
-This is the next practical interaction gap.
-
-Focus:
-
-1. hover / pointer move
-2. pointer down / up
-3. drag
-4. wheel / scroll
-
-The goal is to move from keyboard/click-driven workflows to more complete desktop interaction coverage.
-
-### Priority 2 - subtree / node-level capture
-
-The current visual proof lane already supports full-window/document capture.
-
-The next visual refinement should stay narrow:
-
-1. target a specific node/subtree
-2. crop to its visual bounds
-3. prove that the captured pixels correspond to the inspect-selected element
-
-This is the most valuable next step for visual proof because it directly links semantic selection to rendered-pixel evidence without expanding into a full visual diff platform yet.
+1. **Attach & Discovery**: Socket management, descriptor discovery (`~/.blitz-host/` or tmp), list command, `--pid` targeting.
+2. **UI-Thread Safe Inspect**: Semantic tags, IDs, roles, text, document-relative layout bounds, active/focused/hovered states, scroll offsets.
+3. **Core Interactive Actions**: Click, Focus, SetValue, Settle (`settle(n)` / `settle_until`).
+4. **Bounded Keyboard Lane**: Enter, Space, Shift+Tab focus navigation, key character typing, Select All + Overwrite, Backspace, Escape.
+5. **Core Mouse / Pointer / Wheel Lane**: `hover`/`move`, `down`, `up`, composed `drag`, `wheel`/`scroll`, verified with hit-testing leaf vs ancestor hover contract.
+6. **Full-Window Visual Capture**: Headless in-process Vello CPU scene rasterization to PNG bytes.
+7. **Subtree / Node-Level Visual Capture**: Crop-based capture of inspect-selected nodes to physical pixel bounds, returning node ID and cropped dimensions.
+8. **Oxidase Runtime Boundary Split**: Canonical `cross_host` example vs native runner harness.
 
 ## Later expansion categories
+
+With the core interaction and visual proof lanes complete, later optional categories include:
 
 After the two priorities above, later categories can include:
 

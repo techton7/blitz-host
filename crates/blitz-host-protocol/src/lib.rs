@@ -347,6 +347,9 @@ pub struct CaptureRequest {
     /// Optional target window handle (falls back to primary window if None).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_id: Option<u64>,
+    /// Optional target node handle (if specified, crops the capture to this node's visual bounds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<u64>,
 }
 
 /// Result of capturing a visual screenshot.
@@ -363,6 +366,9 @@ pub struct CaptureResponse {
     pub format: String,
     /// Base64-encoded image payload bytes.
     pub data_base64: String,
+    /// Target node ID that was cropped, if requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<u64>,
     /// Optional status or failure message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -524,9 +530,11 @@ mod tests {
         // Test Capture roundtrip
         let cap_req = ControlRequest::Capture(CaptureRequest {
             window_id: Some(99),
+            node_id: Some(42),
         });
         let cap_req_json = serde_json::to_string(&cap_req).unwrap();
         assert!(cap_req_json.contains("\"type\":\"capture\""));
+        assert!(cap_req_json.contains("\"nodeId\":42"));
         let cap_req_parsed: ControlRequest = serde_json::from_str(&cap_req_json).unwrap();
         assert_eq!(cap_req, cap_req_parsed);
 
@@ -636,6 +644,7 @@ mod tests {
             height: 600,
             format: "png".into(),
             data_base64: "iVBORw0KGgoAAAANSUhEUg==".into(),
+            node_id: None,
             message: Some("Screenshot captured".into()),
         });
         let cap_resp_json = serde_json::to_string(&cap_resp).unwrap();
