@@ -1,4 +1,4 @@
-# Worker Instruction: Implement `querySelector`-Style Selector Targeting in `blitz-host` (Still No Rhai)
+# Worker Instruction: Implement the Host Ambiguity Guard (`len == 1` implicit, `len >= 2` require `--pid`)
 
 You are working in:
 
@@ -6,13 +6,9 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The direction is now fixed:
+The decision is now fixed:
 
-> **`querySelector` / selector-based targeting should be implemented in `blitz-host` now**
-
-At the same time:
-
-> **runtime scripting (Rhai / eval / run / REPL) is still deferred and must not be implemented in this pass**
+> **when there is exactly one live host, implicit auto-discovery is allowed; when there are multiple live hosts, silent guessing is forbidden and the caller must specify `--pid`**
 
 Write all agent-facing reasoning in English.
 
@@ -29,153 +25,130 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Add selector-based targeting so that `blitz-host` users no longer need to depend only on ephemeral numeric `node_id`s for common workflows.
+Implement a deterministic ambiguity guard for host discovery.
 
-The point is:
+The desired behavior is:
 
-> **selector ergonomics now, scripting later**
+1. **0 live hosts** → clean “not found” error
+2. **1 live host** → auto-connect is allowed
+3. **2+ live hosts** → auto-connect is rejected; caller must provide `--pid <PID>` (or explicit descriptor/socket path if supported)
 
-The selector work should meaningfully improve the current CLI/client surface without dragging in a scripting runtime.
+This should eliminate silent mis-targeting while preserving zero-friction usage in the single-host case.
 
 ---
 
-## 2. Scope Boundary
+## 2. Architectural Rule
+
+This policy must live in the **transport/discovery layer**, not only in the CLI.
+
+That means:
+
+> the ambiguity rule should be the transport layer’s single source of truth, so both CLI users and programmatic API consumers get identical behavior.
+
+If the CLI alone enforces the rule, the programmatic client path can still behave differently, which is not acceptable.
+
+---
+
+## 3. Required Behavior
+
+### A. `TargetSelector::Auto`
+
+When the selector is implicit/auto:
+
+1. `0` hosts → `NotFound`
+2. `1` host → return that host
+3. `2+` hosts → return an ambiguity error listing the competing PIDs and requiring `--pid`
+
+### B. `TargetSelector::Pid(pid)`
+
+When the selector is explicit by PID:
+
+1. connect to that PID if reachable
+2. error clearly if that PID is not present / not reachable
+
+### C. Explicit path targeting
+
+If explicit descriptor/socket path targeting already exists, preserve it.
+
+The ambiguity guard is specifically about implicit auto-discovery.
+
+---
+
+## 4. CLI Expectations
+
+The CLI should be updated so that:
+
+1. `blitz-host list` shows available hosts clearly
+2. commands using auto-discovery fail fast with a clean error if multiple hosts are active
+3. the error explains how to recover:
+   - use `blitz-host list`
+   - then rerun with `--pid <PID>`
+
+It is acceptable and desirable to centralize repeated connection boilerplate into one helper.
+
+### Preferred structure
+
+Prefer separating:
+
+1. selector determination
+2. client connection / ambiguity handling
+
+into clean helper functions rather than copy-pasting connection logic across many subcommands.
+
+---
+
+## 5. Scope Boundary
 
 ### Must implement
 
-1. selector-based targeting in the protocol / bridge
-2. selector-based targeting in the client / CLI surface
-3. live proof that selectors resolve and actions operate on the resolved nodes
+1. ambiguity guard in transport/discovery
+2. PID-based deterministic targeting in CLI paths that connect to a host
+3. shared connection plumbing so the rule is applied consistently
 
 ### Must not implement
 
-1. Rhai
-2. `eval`
-3. `run <file>`
-4. REPL / shell
-5. general-purpose scripting wrappers
+1. `--instance` visible CLI targeting
+2. same-process multi-window routing
+3. speculative broader target-selection complexity
 
-This is a selector ergonomics pass, not a scripting pass.
+This pass is specifically about the ambiguity guard and PID disambiguation.
 
 ---
 
-## 3. Suggested Targeting Model
-
-Use a small polymorphic targeting model, for example:
-
-1. direct numeric node ID
-2. CSS selector string
-
-The exact type shape is up to you, but it should let a caller say either:
-
-1. “act on node `4294967402`”
-2. “act on `#submit-button`”
-
-without inventing a full scripting layer.
-
-Reasonable commands to support first:
-
-1. `inspect`
-2. `click`
-3. `focus`
-4. `set-value`
-5. `capture`
-
-You may decide whether keyboard/mouse actions should also accept selectors in the same pass if it stays coherent and does not sprawl.
-
----
-
-## 4. Existing Engine Seam to Reuse
-
-You should first inspect and then reuse the native selector/query support that already exists in the current engine/runtime stack where possible.
-
-Do not re-implement a CSS selector engine from scratch.
-
-The purpose of this pass is to expose that power through `blitz-host`, not to recreate Stylo/DOM selector machinery.
-
----
-
-## 5. CLI / UX Goal
-
-The ergonomic target is that users can write things like:
-
-```bash
-blitz-host inspect "#test-input"
-blitz-host focus "#test-input"
-blitz-host set-value "#test-input" "hello"
-blitz-host mouse click "#submit-button"
-blitz-host capture "#mouse-test-card" -o target/card.png
-```
-
-You do not need to implement every example above if one or two are enough to prove the model, but the direction should be that selector-based targeting is real and usable.
-
-Keep the visible CLI surface simple.
-
----
-
-## 6. Proof Expectations
-
-The proof must show that selectors resolve on the live UI thread against the current live DOM/document, not against stale cached JSON.
-
-At minimum, prove:
-
-1. selector resolves to the expected live target
-2. action executes against that target
-3. the resulting state change is inspect-visible
-
-Good proof cases:
-
-1. `#test-input`
-2. `#test-interaction-button`
-3. `#mouse-test-card`
-
-Do not stop at “selector parsed successfully.”
-
-The proof is successful selection **plus** successful action/outcome.
-
----
-
-## 7. What Not to Do
-
-1. do not add scripting
-2. do not implement a parallel selector engine if an existing seam is available
-3. do not over-expand the action matrix in the same pass
-4. do not make the new selector surface so magical that it becomes ambiguous or hard to debug
-
-This should still feel like a deterministic control plane.
-
----
-
-## 8. Files / Areas to Reinspect
+## 6. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/ROADMAP.md`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
-7. relevant Blitz / DOM selector APIs in the current engine stack
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/discovery.rs`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/client.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
 
 ---
 
-## 9. Validation You Must Run
+## 7. Validation You Must Run
 
-Run the smallest commands that honestly prove selector targeting works.
+Run the smallest commands/tests that prove the ambiguity guard actually works.
 
 At minimum:
 
-1. protocol / transport tests for the new target representation
-2. any focused selector-resolution tests available or needed
-3. live native E2E proving selector-based targeting against a running host
-4. confirmation that existing node-id-based flows still work
+1. unit tests for discovery behavior:
+   - zero hosts
+   - one host
+   - multiple hosts
+   - explicit PID
+2. CLI or integration proof showing:
+   - implicit success with one live host
+   - ambiguity failure with multiple live hosts
+   - deterministic success with `--pid`
+3. confirmation that existing attach / inspect / action paths still work after the change
 
 If markdown files are edited, validate them.
 
 ---
 
-## 10. `result.md` Requirement
+## 8. `result.md` Requirement
 
 Update:
 
@@ -183,23 +156,23 @@ Update:
 
 It must explicitly record:
 
-1. what selector targeting surface was added
-2. what engine/runtime selector seam it reuses
-3. which commands now support selectors
-4. what live proof was observed
-5. that Rhai/runtime scripting remains deferred
-6. what remains unresolved
+1. where the ambiguity rule lives
+2. what happens in the 0 / 1 / many host cases
+3. what CLI helper/plumbing was consolidated
+4. what validation proved the rule
+5. what remains deferred
 
 ---
 
-## 11. Final Verdict Rule
+## 9. Final Verdict Rule
 
-You may report **Implemented and proven** only if:
+You may report **Implemented and clarified** only if:
 
-1. selector-based targeting is real
-2. it works against the live current DOM, not cached prior inspect data
-3. at least one action/outcome flow is proven through selectors
-4. runtime scripting is still clearly out of scope in this pass
+1. implicit selection works only in the single-host case
+2. ambiguous multi-host auto-discovery fails fast and cleanly
+3. `--pid` deterministically resolves the target
+4. the rule is implemented in the transport/discovery layer, not just the CLI
+5. existing control-plane behavior still works
 
 Otherwise report:
 
@@ -209,4 +182,4 @@ or
 
 The purpose of this pass is:
 
-> make `blitz-host` selector-ergonomic without turning it into a scripting platform.
+> remove silent multi-host mis-targeting without destroying the convenient single-host workflow.

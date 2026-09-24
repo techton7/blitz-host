@@ -1,141 +1,129 @@
-# Result: querySelector-Style CSS Selector Targeting in blitz-host
+# Result: Host Target Disambiguation & Shareable Ambiguity Guard
 
 ## 1. Current Repo Facts
 
-1. **Active `blitz-host` Control Plane Baseline**:
-   - `blitz-host` is the native, out-of-process control plane and live DOM inspection harness for Blitz and Dioxus Native desktop applications.
-   - It provides Unix Domain Socket (UDS) transport, owner-only discovery (`~/.blitz-host/`), UI-thread synchronization, deterministic VSync frame settlement (`settle(n)`), and headless CPU visual capture.
-   - Previously, all inspection and action commands required callers to supply ephemeral numeric `node_id: u64` identifiers (e.g. `blitz-host mouse click 4294967402`). Callers had to inspect the entire window first, locate the target element's numeric ID, and then issue action requests.
+1. **`blitz-host` Control Plane Baseline**:
+   - `blitz-host` provides an out-of-process control plane and live DOM inspection harness for Blitz and Dioxus Native desktop applications over local Unix Domain Sockets (UDS).
+   - Core interactive and proof lanes are complete: UI-thread synchronization, deterministic VSync settlement (`settle(n)`), visual full-window and cropped capture (`-o <PATH>`), compound keyboard shortcut dispatch, mouse namespace hierarchy, and CSS selector targeting (`ElementTarget`).
 
-2. **Existing Engine Seam**:
-   - The underlying native engine (`blitz_dom::BaseDocument`) already embeds the Servo/Stylo selector engine and exposes `doc.query_selector(selector_str) -> Result<Option<NodeId>, ParseError>`.
-   - Additionally, `doc.get_element_by_id(id_str) -> Option<NodeId>` provides fast ID lookup for unadorned HTML/DOM identifiers.
-   - No custom or duplicate CSS selector parser needed to be invented.
+2. **Previous Target Selection Model**:
+   - Prior to this pass, `TargetSelector::Auto` silently picked the first (newest modified) host descriptor from `list_hosts()`.
+   - When multiple live Blitz instances were running concurrently (e.g. background runners, multiple test suites, or stale processes), `blitz-host` commands without `--pid` silently guessed and dispatched actions to an arbitrary host.
+   - This introduced non-deterministic behavior and silent mis-targeting into automated and agentic test workflows.
 
-3. **Strict Scope Boundary**:
-   - Per `instruction.md`, runtime scripting (Rhai, Boa, `eval`, `run`, REPL/interactive shell, general-purpose scripting wrappers) remains strictly deferred and is out of scope for `blitz-host`.
-   - The goal was purely **selector ergonomics now, scripting later**.
+3. **Core Scope Boundary**:
+   - As specified in `instruction.md`, runtime scripting (Rhai, `eval`, `run`, REPL) remains deferred to the cross-host `oxidase` layer.
+   - Same-process multi-window routing and speculative target extensions (e.g. `--instance`) remain out of scope for this pass.
 
 ---
 
 ## 2. What I Changed
 
-1. **Protocol Layer (`crates/blitz-host-protocol`)**:
-   - Introduced `ElementTarget` enum:
+1. **Transport Layer Ambiguity Guard (`crates/blitz-host-transport/src/discovery.rs`)**:
+   - Implemented `resolve_target_from_hosts(selector: &TargetSelector, hosts: Vec<HostDescriptor>) -> io::Result<HostDescriptor>` as the single source of truth for host disambiguation.
+   - Replaced silent guessing in `discover_target` with the deterministic policy:
+     - **0 hosts**: Returns `io::ErrorKind::NotFound` (`"No active blitz-host instances found in $TMPDIR/blitz-host"`).
+     - **1 host**: Returns `Ok(host)`, allowing implicit auto-discovery for zero-friction development.
+     - **2+ hosts**: Rejects auto-discovery with `io::ErrorKind::InvalidInput`, reporting all competing PIDs:
+       `"Multiple active Blitz hosts detected (PIDs: [...]). Target is ambiguous: please specify --pid <PID> (or connect_pid) to target a specific host."`
+   - Explicit PID targeting (`TargetSelector::Pid(target_pid)`) deterministically filters for the matching PID regardless of the total number of running instances.
+
+2. **CLI Connection Plumbing Consolidation (`crates/blitz-host/src/bin/blitz-host.rs`)**:
+   - Created a centralized, shareable connection helper:
      ```rust
-     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-     #[serde(untagged)]
-     pub enum ElementTarget {
-         Id(u64),
-         Selector(String),
+     fn connect_cli_client(selector: &TargetSelector) -> DebugClient {
+         match DebugClient::connect_target(selector) {
+             Ok(c) => c,
+             Err(e) => {
+                 eprintln!("Error connecting to Blitz host: {e}");
+                 eprintln!("Use 'blitz-host list' to inspect available hosts.");
+                 std::process::exit(1);
+             }
+         }
      }
      ```
-   - Implemented `Display`, `From<u64>`, `From<&str>`, and `From<String>` for `ElementTarget`.
-   - Extended `InspectRequest`, `CaptureRequest`, and all `ActionRequest` variants (`Click`, `Focus`, `SetValue`, `Key`, `MouseMove`, `MouseDown`, `MouseUp`, `Wheel`) to support both `target: Option<ElementTarget>` and `selector: Option<String>` while preserving full backward compatibility with `node_id: Option<u64>`.
-   - Added convenient `.target(&self) -> Option<ElementTarget>` helper methods across all action types.
+   - Separated argument parsing (`determine_selector(subargs) -> TargetSelector`) from connection execution (`connect_cli_client(&selector)`).
+   - Replaced repetitive 8-line connection/error boilerplate across all 11 subcommand execution paths (`handle_move_command`, `handle_down_command`, `handle_up_command`, `handle_wheel_command`, `handle_drag_command`, `handle_click_command`, `inspect`, `capture`, `focus`, `set-value`, and `key`).
+   - Standardized exit code 1 with actionable stderr diagnostics directing users to `blitz-host list` and `--pid <PID>`.
 
-2. **Bridge Layer (`crates/blitz-host-bridge`)**:
-   - Created `crates/blitz-host-bridge/src/target.rs` implementing `resolve_target_in_doc`:
-     ```rust
-     pub fn resolve_target_in_doc(
-         doc: &BaseDocument,
-         target: Option<&ElementTarget>,
-         node_id: Option<u64>,
-         selector: Option<&str>,
-     ) -> Result<Option<u64>, String>
-     ```
-   - Reuses `doc.query_selector(trimmed)` directly on the UI thread against the live DOM document, with fallback to `doc.get_element_by_id` for bare element IDs.
-   - Updated `inspect_document` and `capture_document` to resolve targets before taking subtree snapshots or cropping node rectangles.
-   - Added unit test coverage for node ID and selector resolution paths.
+3. **Transport Unit Test Suite (`crates/blitz-host-transport/src/discovery.rs`)**:
+   - Added unit tests directly validating the disambiguation matrix:
+     - `test_resolve_target_auto_zero_hosts_returns_not_found`: Proves 0 hosts returns `NotFound`.
+     - `test_resolve_target_auto_single_host_succeeds`: Proves 1 host succeeds without `--pid`.
+     - `test_resolve_target_auto_multiple_hosts_blocks_with_ambiguity`: Proves 2+ hosts fail fast with `InvalidInput` and list competing PIDs.
+     - `test_resolve_target_pid_disambiguation_succeeds`: Proves explicit `--pid` resolves correctly among multiple competing hosts.
+     - `test_resolve_target_pid_missing_returns_not_found`: Proves explicit non-existent PID returns `NotFound`.
 
-3. **Transport Client Layer (`crates/blitz-host-transport`)**:
-   - Added polymorphic client methods accepting `impl Into<ElementTarget>`:
-     - `client.inspect_target(target)`
-     - `client.click_target(target)`
-     - `client.focus_target(target)`
-     - `client.set_value_target(target, text)`
-     - `client.capture_target(target, output_path)`
-     - `client.capture_target_window(target)`
-     - `client.capture_target_to_file(target, path)`
-     - `client.mouse_move_target(target, x, y)`
-     - `client.mouse_down_target(target, x, y, button, click_count)`
-     - `client.mouse_up_target(target, x, y, button, click_count)`
-     - `client.wheel_target(target, dx, dy)`
-     - `client.drag_target(from_target, to_target)`
-     - `client.key_target(target, key)`
-   - Preserved 100% backward compatibility for all existing numeric node ID client methods (`client.click(node_id)`, `client.hover(node_id)`, etc.).
-
-4. **Host Runtime (`crates/blitz-host/src/host.rs`)**:
-   - In `HostControl::handle_action` and `HostControl::handle_action_click`, integrated `resolve_target_in_doc` on the UI thread to resolve any selector or `ElementTarget` immediately before dispatching synthetic events into Dioxus Native.
-   - Preserves deterministic UI-thread safety and ensures selectors evaluate against the current, live DOM rather than stale cached JSON.
-
-5. **CLI Subcommands (`crates/blitz-host/src/bin/blitz-host.rs`)**:
-   - Added `parse_target_flag` helper supporting `--selector`, `-s`, `--node`, `-n`, and positional target arguments that can be either numeric node IDs or CSS selector strings.
-   - Updated subcommands to support selector targeting:
-     - `blitz-host inspect [TARGET]` / `--selector <SEL>`
-     - `blitz-host capture [TARGET] -o <PATH>` / `--selector <SEL>`
-     - `blitz-host focus <TARGET>` / `--selector <SEL>`
-     - `blitz-host set-value <TARGET> <VALUE>` / `--selector <SEL>`
-     - `blitz-host mouse click <TARGET>` / `--selector <SEL>`
-     - `blitz-host mouse move <TARGET>` / `--selector <SEL>`
-     - `blitz-host mouse down <TARGET>` / `--selector <SEL>`
-     - `blitz-host mouse up <TARGET>` / `--selector <SEL>`
-     - `blitz-host mouse wheel <TARGET> --dy <DY>` / `--selector <SEL>`
-     - `blitz-host mouse drag <FROM_TARGET> <TO_TARGET>`
-     - `blitz-host key <KEY> [TARGET]` / `--selector <SEL>`
-   - Upgraded all raw string literals (`r#"..."#`) in help text to `r##"..."##` to avoid delimiter collisions with CSS ID selectors (e.g. `"#test-input"`).
-   - Enforced exit code 1 with descriptive stderr errors when action targets cannot be resolved in the live document.
-
-6. **Preservation of Non-Scripting Boundary**:
-   - No Rhai, Boa, QuickJS, or other scripting runtime was introduced.
-   - No `eval`, `run`, REPL, or shell subcommands were added.
-   - Cross-host scenario scripting remains anchored at `oxidase`.
-
-7. **Unresolved / Future Work**:
-   - Multi-node queries (`querySelectorAll` returning a list of matching nodes) can be added in a future pass if batch operations are needed.
-   - Complex pseudo-elements (e.g. `::before`, `::after`) that do not exist as independent DOM nodes in Stylo are not addressable as standalone action targets.
+4. **Preserved Deferred Scope**:
+   - Runtime scripting (Rhai, `eval`, `run`, REPL) remains 100% out of scope and deferred.
+   - Instance ID targeting (`--instance`) and multi-window routing remain deferred.
 
 ---
 
 ## 3. Validation Actually Run
 
-1. **Protocol, Bridge, and Transport Unit Tests**:
+1. **Discovery Unit Tests (`crates/blitz-host-transport`)**:
    ```bash
-   cargo test --lib
+   cargo test -p blitz-host-transport --lib
    ```
-   - `blitz-host-protocol`: 2/2 tests passed (`test_descriptor_serde_roundtrip`, `test_control_envelope_serde_roundtrip`).
-   - `blitz-host-bridge`: 5/5 tests passed (`test_resolve_target_by_node_id`, `test_resolve_target_none`, `test_inspect_document_minimal`, `test_bridge_focus_and_set_value_actions`, `test_bridge_capture_document`).
-   - `blitz-host-transport`: 1/1 test passed (`test_transport_roundtrip_server_client`).
+   - Output: 6 passed; 0 failed; finished in 0.01s.
+   - All 5 new ambiguity guard tests passed cleanly alongside the transport roundtrip test.
 
-2. **Live Native E2E Test Suite (`crates/blitz-host-transport/tests/live_inspect.rs`)**:
-   - Spawned live `oxidase-native-runner` desktop application window and attached via `blitz-host` UDS transport.
-   - Verified all 14 integration test steps, including newly added **STEP 14**:
-     - **14.1 (Client inspect_target)**: `client.inspect_target("#test-input")` successfully returns a subtree rooted at the input element (`dom_id: "test-input"`).
-     - **14.2 (CLI mouse click with selector)**: `blitz-host mouse click "#test-interaction-button"` successfully dispatches click, updates button label to `"Clicked 1 times"`, and returns `{"success": true}` JSON on stdout.
-     - **14.3 (CLI focus with selector)**: `blitz-host focus "#test-input"` successfully sets input focus, verified by live focus indicator rendering `"Focused: true"`.
-     - **14.4 (CLI set-value with selector)**: `blitz-host set-value "#test-input" "Typed via CSS selector proof!"` successfully updates input value and text node in live DOM.
-     - **14.5 (CLI inspect subtree with selector)**: `blitz-host inspect "#mouse-test-card"` returns scoped subtree JSON rooted at `dom_id: "mouse-test-card"`.
-     - **14.6 (CLI capture node with selector)**: `blitz-host capture "#mouse-test-card" -o target/cli_proof_selector_card.png` crops exact node rectangle and writes PNG to disk, outputting compact metadata-only JSON without base64.
-     - **14.7 (CLI mouse move with selector)**: `blitz-host mouse move "#mouse-test-card"` updates hover state and triggers reactive `"HOVERED"` status text.
-     - **14.8 (Missing selector error handling)**: `blitz-host mouse click "#non-existent-element-xyz"` fails with exit code `1` and prints descriptive error `"Element matching selector '#non-existent-element-xyz' not found in document"` on stderr.
-   - Full test run completed in 16.42s with zero failures:
-     ```text
-     test test_live_native_runner_attach_and_inspect ... ok
-     test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.42s
+2. **Live Multi-Host CLI Disambiguation Proof**:
+   - Spawned live `oxidase-native-runner` instance (PID 89303).
+   - Spawned second concurrent `oxidase-native-runner` instance (PID 24713).
+   - Verified `blitz-host list`:
+     ```json
+     [
+       { "pid": 24713, "renderer": "oxidase-native-runner", ... },
+       { "pid": 89303, "renderer": "oxidase-native-runner", ... }
+     ]
      ```
+   - **Ambiguity Guard Verification**: Ran `blitz-host inspect "#test-input"` without `--pid`.
+     - Output: Exited with code `1` and printed:
+       ```text
+       Error connecting to Blitz host: Multiple active Blitz hosts detected (PIDs: [24713, 89303]). Target is ambiguous: please specify --pid <PID> (or connect_pid) to target a specific host.
+       Use 'blitz-host list' to inspect available hosts.
+       ```
+   - **Disambiguation with `--pid` Verification**:
+     - `blitz-host inspect "#test-input" --pid 89303`: Succeeded (exit code `0`), returned subtree from PID 89303.
+     - `blitz-host inspect "#test-input" --pid 24713`: Succeeded (exit code `0`), returned subtree from PID 24713.
+   - **Post-Cleanup Auto-Discovery**:
+     - Terminated PID 24713.
+     - Ran `blitz-host inspect "#test-input"` without `--pid`.
+     - Succeeded (exit code `0`), automatically attaching to the remaining single host (PID 89303).
+   - **Zero Hosts Verification**:
+     - Terminated PID 89303.
+     - Ran `blitz-host inspect "#test-input"`.
+     - Exited with code `1` and printed:
+       ```text
+       Error connecting to Blitz host: No active blitz-host instances found in $TMPDIR/blitz-host
+       Use 'blitz-host list' to inspect available hosts.
+       ```
 
-3. **Markdown Structure Verification**:
+3. **Full Workspace Integration Suite (`crates/blitz-host-transport/tests/live_inspect.rs`)**:
    ```bash
-   bash ~/.copilot/skills/verify-markdown/bin/verify-markdown.sh result.md --require-frontmatter false
+   cargo test
+   ```
+   - 5 bridge unit tests passed.
+   - 2 protocol unit tests passed.
+   - 6 transport unit tests passed.
+   - 14 live native E2E test steps passed in 10.83s with zero failures.
+
+4. **Markdown Structure Verification**:
+   ```bash
+   bash /Users/gohyeoncheol/.gemini/config/skills/verify-markdown/bin/verify-markdown.sh result.md --require-frontmatter false
+   bash /Users/gohyeoncheol/.gemini/config/skills/verify-markdown/bin/verify-markdown.sh handoff.md --require-frontmatter false
    ```
 
 ---
 
 ## 4. Final Verdict
 
-**Implemented and proven**
+**Implemented and clarified**
 
-1. Selector-based targeting is real and functional across the wire protocol, bridge, client API, and CLI.
-2. Selectors resolve on the main UI thread against the live `BaseDocument` via Stylo's native `query_selector`, with bare ID fallback.
-3. Live actions (`inspect`, `mouse click`, `focus`, `set-value`, `mouse move`, `capture`) were executed against selector targets on an active desktop window and proven via observable Dioxus state changes.
-4. Runtime scripting (Rhai, Boa, `eval`, `run`, REPL) remains 100% out of scope and deferred.
+1. Implicit host selection works only in the single-host case (`len == 1`).
+2. Ambiguous multi-host auto-discovery fails fast and cleanly with exit code `1` and actionable stderr guidance (`len >= 2`).
+3. `--pid <PID>` deterministically resolves and targets specific hosts when multiple instances exist.
+4. The ambiguity guard is implemented in the transport layer (`discovery::resolve_target_from_hosts`), guaranteeing single-source-of-truth protection for both CLI and programmatic Rust API consumers.
+5. All 14 existing native control-plane and visual proof test steps continue to pass without regression.

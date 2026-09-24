@@ -641,6 +641,19 @@ fn determine_selector(args: &[String]) -> TargetSelector {
     }
 }
 
+/// Connect to Blitz host matching the selector, exiting cleanly with code 1 if connection or ambiguity fails.
+fn connect_cli_client(selector: &TargetSelector) -> DebugClient {
+    match DebugClient::connect_target(selector) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error connecting to Blitz host: {e}");
+            eprintln!("Use 'blitz-host list' to inspect available hosts.");
+            std::process::exit(1);
+        }
+    }
+}
+
+
 /// Helper to parse compound key expressions like `cmd+a`, `command+shift+z`, `shift+tab`.
 fn parse_compound_key(raw: &str) -> (String, Option<KeyModifiers>) {
     let mut shift = false;
@@ -747,15 +760,7 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching pointer move (target: {:?}, coords: {:?}) (PID: {})...",
@@ -835,15 +840,7 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching pointer down (target: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
@@ -924,15 +921,7 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching pointer up (target: {:?}, coords: {:?}, button: {:?}) (PID: {})...",
@@ -1025,15 +1014,7 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching mouse wheel (target: {:?}, dx: {}, dy: {}, coords: {:?}) (PID: {})...",
@@ -1097,15 +1078,7 @@ fn handle_drag_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching drag sequence from target '{}' to target '{}' (PID: {})...",
@@ -1181,15 +1154,7 @@ fn handle_click_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
     let window_id = parse_window_arg(subargs);
     let selector = determine_selector(subargs);
 
-    let mut client = match DebugClient::connect_target(&selector) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error connecting to Blitz host: {e}");
-            eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-            eprintln!("Use 'blitz-host list' to inspect available hosts.");
-            std::process::exit(1);
-        }
-    };
+    let mut client = connect_cli_client(&selector);
 
     eprintln!(
         "Dispatching click action to target '{}' (PID: {})...",
@@ -1274,15 +1239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let target = parse_target_flag(subargs)
                 .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
+            let mut client = connect_cli_client(&selector);
 
             let mut req = InspectRequest {
                 window_id,
@@ -1354,15 +1311,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let target = parse_target_flag(subargs)
                 .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(err) => {
-                    eprintln!("Error connecting to Blitz host: {err}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
+            let mut client = connect_cli_client(&selector);
 
             let resp = match target {
                 Some(t) => client.capture_target_window(window_id, t, &target_file),
@@ -1445,15 +1394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
+            let mut client = connect_cli_client(&selector);
 
             eprintln!(
                 "Dispatching focus action to target '{}' (PID: {})...",
@@ -1539,15 +1480,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
+            let mut client = connect_cli_client(&selector);
 
             eprintln!(
                 "Dispatching set-value action (value: {:?}) to target '{}' (PID: {})...",
@@ -1621,15 +1554,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
-            let mut client = match DebugClient::connect_target(&selector) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error connecting to Blitz host: {e}");
-                    eprintln!("Make sure a Blitz host is running with `blitz-host` enabled.");
-                    eprintln!("Use 'blitz-host list' to inspect available hosts.");
-                    std::process::exit(1);
-                }
-            };
+            let mut client = connect_cli_client(&selector);
 
             eprintln!(
                 "Dispatching key action '{key_str}' (target: {:?}, modifiers: {:?}) (PID: {})...",

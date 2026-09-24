@@ -101,6 +101,55 @@ pub fn list_hosts() -> io::Result<Vec<HostDescriptor>> {
     Ok(reachable_hosts)
 }
 
+/// Disambiguates an active host from a list of discovered reachable hosts according to the selector.
+///
+/// Policy:
+/// - `TargetSelector::Auto`:
+///   - 0 hosts: Returns `ErrorKind::NotFound`.
+///   - 1 host: Returns the single host (`Ok(host)`).
+///   - 2+ hosts: Fails fast with `ErrorKind::InvalidInput` listing the competing PIDs and demanding `--pid`.
+/// - `TargetSelector::Pid(target_pid)`:
+///   - Matches the host with `host.pid == target_pid`, or returns `ErrorKind::NotFound`.
+/// - `TargetSelector::ExplicitPath`:
+///   - Not applicable to host lists; handled directly in `discover_target`.
+pub fn resolve_target_from_hosts(
+    selector: &TargetSelector,
+    hosts: Vec<HostDescriptor>,
+) -> io::Result<HostDescriptor> {
+    match selector {
+        TargetSelector::ExplicitPath(path) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Cannot resolve explicit path '{}' from host list", path.display()),
+        )),
+        TargetSelector::Pid(target_pid) => hosts
+            .into_iter()
+            .find(|d| d.pid == *target_pid)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("No live, reachable Blitz host found with PID {target_pid}"),
+                )
+            }),
+        TargetSelector::Auto => match hosts.len() {
+            0 => Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No active blitz-host instances found in $TMPDIR/blitz-host",
+            )),
+            1 => Ok(hosts.into_iter().next().unwrap()),
+            _ => {
+                let pids: Vec<u32> = hosts.iter().map(|h| h.pid).collect();
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "Multiple active Blitz hosts detected (PIDs: {pids:?}). \
+                         Target is ambiguous: please specify --pid <PID> (or connect_pid) to target a specific host."
+                    ),
+                ))
+            }
+        },
+    }
+}
+
 /// Discover a live, reachable Blitz host according to the provided selector.
 pub fn discover_target(selector: &TargetSelector) -> io::Result<HostDescriptor> {
     match selector {
@@ -133,26 +182,9 @@ pub fn discover_target(selector: &TargetSelector) -> io::Result<HostDescriptor> 
                 ))
             }
         }
-        TargetSelector::Pid(target_pid) => {
+        TargetSelector::Pid(_) | TargetSelector::Auto => {
             let hosts = list_hosts()?;
-            hosts
-                .into_iter()
-                .find(|d| d.pid == *target_pid)
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("No live, reachable Blitz host found with PID {target_pid}"),
-                    )
-                })
-        }
-        TargetSelector::Auto => {
-            let hosts = list_hosts()?;
-            hosts.into_iter().next().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "No active blitz-host instances found in $TMPDIR/blitz-host",
-                )
-            })
+            resolve_target_from_hosts(selector, hosts)
         }
     }
 }
@@ -193,5 +225,70 @@ fn is_pid_alive(pid: u32) -> bool {
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_descriptor(pid: u32) -> HostDescriptor {
+        HostDescriptor {
+            protocol_version: 1,
+            pid,
+            instance_id: format!("test-{pid}"),
+            socket_path: format!("/tmp/test-{pid}.sock"),
+            renderer: "test".to_string(),
+            renderer_version: "0.1.0".to_string(),
+            primary_window_id: None,
+            primary_document_id: None,
+        }
+    }
+
+    #[test]
+    fn test_resolve_target_auto_zero_hosts_returns_not_found() {
+        let res = resolve_target_from_hosts(&TargetSelector::Auto, vec![]);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_resolve_target_auto_single_host_succeeds() {
+        let host1 = dummy_descriptor(1001);
+        let res = resolve_target_from_hosts(&TargetSelector::Auto, vec![host1]);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap().pid, 1001);
+    }
+
+    #[test]
+    fn test_resolve_target_auto_multiple_hosts_blocks_with_ambiguity() {
+        let host1 = dummy_descriptor(1001);
+        let host2 = dummy_descriptor(1002);
+        let res = resolve_target_from_hosts(&TargetSelector::Auto, vec![host1, host2]);
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        let msg = err.to_string();
+        assert!(msg.contains("Multiple active Blitz hosts detected"));
+        assert!(msg.contains("1001"));
+        assert!(msg.contains("1002"));
+        assert!(msg.contains("--pid"));
+    }
+
+    #[test]
+    fn test_resolve_target_pid_disambiguation_succeeds() {
+        let host1 = dummy_descriptor(1001);
+        let host2 = dummy_descriptor(1002);
+        let res = resolve_target_from_hosts(&TargetSelector::Pid(1002), vec![host1, host2]);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap().pid, 1002);
+    }
+
+    #[test]
+    fn test_resolve_target_pid_missing_returns_not_found() {
+        let host1 = dummy_descriptor(1001);
+        let res = resolve_target_from_hosts(&TargetSelector::Pid(9999), vec![host1]);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), io::ErrorKind::NotFound);
     }
 }
