@@ -5,9 +5,8 @@
 
 use std::path::PathBuf;
 
-use base64::prelude::*;
 use blitz_host::client::{DebugClient, TargetSelector};
-use blitz_host::protocol::{CaptureMetadataResponse, InspectRequest, KeyModifiers};
+use blitz_host::protocol::{InspectRequest, KeyModifiers};
 
 fn print_main_help() {
     println!(
@@ -1148,8 +1147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let resp = match node_id {
-                Some(nid) => client.capture_node(nid),
-                None => client.capture(),
+                Some(nid) => client.capture_node(nid, &target_file),
+                None => client.capture(&target_file),
             };
 
             let resp = match resp {
@@ -1168,33 +1167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
 
-            let png_bytes = match BASE64_STANDARD.decode(&resp.data_base64) {
-                Ok(b) => b,
-                Err(e) => {
-                    eprintln!("Error decoding PNG base64 payload: {e}");
-                    std::process::exit(1);
-                }
-            };
-
-            if let Some(parent) = target_file.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)?;
-                }
-            }
-            std::fs::write(&target_file, &png_bytes)?;
-
-            let meta = CaptureMetadataResponse {
-                success: resp.success,
-                file_path: target_file.display().to_string(),
-                width: resp.width,
-                height: resp.height,
-                format: resp.format,
-                node_id: resp.node_id.or(node_id),
-                bytes: png_bytes.len(),
-                message: resp.message,
-            };
-
-            println!("{}", serde_json::to_string_pretty(&meta)?);
+            println!("{}", serde_json::to_string_pretty(&resp)?);
             Ok(())
         }
         "click" => {

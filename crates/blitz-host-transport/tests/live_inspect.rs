@@ -598,44 +598,38 @@ fn test_live_native_runner_attach_and_inspect() {
     // STEP 11: Visual Capture Proof (Live Visual Screenshot PNG)
     // =========================================================================
     println!("Capturing visual screenshot from live native host...");
-    let cap_resp = client.capture().expect("capture request failed");
+    let proof_artifact_path = std::path::PathBuf::from("target/live_proof_artifact.png");
+    let _ = std::fs::remove_file(&proof_artifact_path);
+    let cap_resp = client.capture(&proof_artifact_path).expect("capture request failed");
     println!(
-        "Capture Response: success={}, dimensions={}x{}, format={:?}, base64_len={}",
-        cap_resp.success, cap_resp.width, cap_resp.height, cap_resp.format, cap_resp.data_base64.len()
+        "Capture Response: success={}, dimensions={}x{}, format={:?}, bytes={}, file={}",
+        cap_resp.success, cap_resp.width, cap_resp.height, cap_resp.format, cap_resp.bytes, cap_resp.file_path
     );
     assert!(cap_resp.success, "capture response must indicate success");
     assert!(cap_resp.width > 0, "captured width must be greater than zero");
     assert!(cap_resp.height > 0, "captured height must be greater than zero");
     assert_eq!(cap_resp.format, "png");
-
-    let png_bytes = client.capture_png().expect("capture_png must succeed");
-    assert!(png_bytes.len() > 8);
+    assert_eq!(cap_resp.node_id, None);
+    assert!(cap_resp.bytes > 100, "captured PNG bytes must be non-trivial");
+    assert!(proof_artifact_path.exists());
+    let png_bytes = std::fs::read(&proof_artifact_path).expect("file must exist on disk");
     assert_eq!(
         &png_bytes[0..4],
         &[0x89, b'P', b'N', b'G'],
         "CRITICAL PROOF: Captured visual payload must start with valid PNG header magic bytes"
     );
 
-    // Test capture_to_file
-    let proof_artifact_path = std::path::PathBuf::from("target/live_proof_artifact.png");
-    let (w, h, saved_path) = client
-        .capture_to_file(&proof_artifact_path)
-        .expect("capture_to_file must succeed");
-    println!("  • Wrote visual proof PNG to {} ({}x{})", saved_path.display(), w, h);
-    assert!(saved_path.exists());
-    let file_size = std::fs::metadata(&saved_path).unwrap().len();
-    println!("  • Live proof PNG size: {} bytes", file_size);
-    assert!(file_size > 100, "captured PNG file size must be substantial");
-
     // =========================================================================
     // STEP 12: Subtree / Node-Level Visual Capture Proof (Cropped PNG)
     // =========================================================================
     println!("Testing subtree / node-level visual capture on #mouse-test-card (node #{})...", card_id);
-    let node_cap_resp = client.capture_node(card_id).expect("node capture request failed");
+    let node_artifact_path = std::path::PathBuf::from("target/live_proof_node_card.png");
+    let _ = std::fs::remove_file(&node_artifact_path);
+    let node_cap_resp = client.capture_node(card_id, &node_artifact_path).expect("node capture request failed");
     println!(
-        "Node Capture Response: success={}, dimensions={}x{}, format={:?}, base64_len={}, node_id={:?}",
+        "Node Capture Response: success={}, dimensions={}x{}, format={:?}, bytes={}, node_id={:?}",
         node_cap_resp.success, node_cap_resp.width, node_cap_resp.height, node_cap_resp.format,
-        node_cap_resp.data_base64.len(), node_cap_resp.node_id
+        node_cap_resp.bytes, node_cap_resp.node_id
     );
     assert!(node_cap_resp.success, "node capture response must indicate success");
     assert_eq!(node_cap_resp.node_id, Some(card_id), "response node_id must match requested node");
@@ -651,29 +645,24 @@ fn test_live_native_runner_attach_and_inspect() {
         "CRITICAL PROOF: cropped node height ({}) must be strictly smaller than full-window height ({})",
         node_cap_resp.height, cap_resp.height
     );
-
-    // Test capture_node_to_file
-    let node_artifact_path = std::path::PathBuf::from("target/live_proof_node_card.png");
-    let (nw, nh, node_saved_path) = client
-        .capture_node_to_file(card_id, &node_artifact_path)
-        .expect("capture_node_to_file must succeed");
-    println!("  • Wrote cropped visual proof PNG to {} ({}x{})", node_saved_path.display(), nw, nh);
-    assert!(node_saved_path.exists());
-    let node_file_size = std::fs::metadata(&node_saved_path).unwrap().len();
-    println!("  • Cropped proof PNG size: {} bytes", node_file_size);
-    assert!(node_file_size > 100, "cropped PNG file size must be non-empty");
+    assert!(node_artifact_path.exists());
+    let node_file_size = std::fs::metadata(&node_artifact_path).unwrap().len();
+    assert_eq!(node_file_size as usize, node_cap_resp.bytes);
 
     // Also test node capture on #test-interaction-button
     println!("Testing node-level visual capture on #test-interaction-button (node #{})...", button_id);
-    let btn_cap_resp = client.capture_node(button_id).expect("button capture failed");
+    let btn_artifact_path = std::path::PathBuf::from("target/live_proof_btn.png");
+    let _ = std::fs::remove_file(&btn_artifact_path);
+    let btn_cap_resp = client.capture_node(button_id, &btn_artifact_path).expect("button capture failed");
     assert!(btn_cap_resp.success);
     assert_eq!(btn_cap_resp.node_id, Some(button_id));
     assert!(btn_cap_resp.width < cap_resp.width);
     assert!(btn_cap_resp.height < cap_resp.height);
+    assert!(btn_artifact_path.exists());
 
     // Test capture on non-existent node reports honest failure
     println!("Testing node-level visual capture on non-existent node #9999999...");
-    let invalid_cap_resp = client.capture_node(9999999).expect("request must succeed over IPC");
+    let invalid_cap_resp = client.capture_node(9999999, "target/nonexistent.png").expect("request must succeed over IPC");
     assert!(!invalid_cap_resp.success, "capture on non-existent node must report success=false");
     assert!(invalid_cap_resp.message.as_deref().unwrap().contains("not found in document"));
 
@@ -754,7 +743,7 @@ fn test_live_native_runner_attach_and_inspect() {
         let full_cap_json: serde_json::Value = serde_json::from_str(full_cap_stdout.trim())
             .expect("blitz-host capture full-window must output valid metadata JSON");
         assert_eq!(full_cap_json["success"], true);
-        assert_eq!(full_cap_json["filePath"], cli_full_path);
+        assert!(full_cap_json["filePath"].as_str().unwrap().ends_with(cli_full_path));
         assert_eq!(full_cap_json["width"], 800);
         assert_eq!(full_cap_json["height"], 600);
         assert!(full_cap_json["nodeId"].is_null(), "full-window capture must have null nodeId");
@@ -774,7 +763,7 @@ fn test_live_native_runner_attach_and_inspect() {
         let cap_json: serde_json::Value = serde_json::from_str(cap_stdout.trim())
             .expect("blitz-host capture must output valid metadata JSON");
         assert_eq!(cap_json["success"], true);
-        assert_eq!(cap_json["filePath"], cli_artifact_path);
+        assert!(cap_json["filePath"].as_str().unwrap().ends_with(cli_artifact_path));
         assert_eq!(cap_json["nodeId"], card_id);
         assert!(cap_json.get("dataBase64").is_none(), "CRITICAL PROOF: metadata JSON must NOT contain dataBase64");
         assert!(std::path::Path::new(cli_artifact_path).exists(), "Output node PNG file must exist on disk");
@@ -792,7 +781,7 @@ fn test_live_native_runner_attach_and_inspect() {
         let cap_flag_json: serde_json::Value = serde_json::from_str(cap_flag_stdout.trim())
             .expect("blitz-host capture --node must output valid metadata JSON");
         assert_eq!(cap_flag_json["success"], true);
-        assert_eq!(cap_flag_json["filePath"], cli_flag_path);
+        assert!(cap_flag_json["filePath"].as_str().unwrap().ends_with(cli_flag_path));
         assert_eq!(cap_flag_json["nodeId"], card_id);
         assert!(cap_flag_json.get("dataBase64").is_none(), "CRITICAL PROOF: metadata JSON must NOT contain dataBase64");
         assert!(std::path::Path::new(cli_flag_path).exists(), "Output node flag PNG file must exist on disk");

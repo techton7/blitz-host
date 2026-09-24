@@ -121,41 +121,75 @@ pub fn capture_document_node_png(
     Ok((final_width, final_height, target_node_id, png_bytes))
 }
 
-/// Capture visual screenshot of `doc` and format as a typed [`CaptureResponse`].
+/// Capture visual screenshot of `doc` and write directly to `request.output_path`.
 pub fn capture_document(doc: &mut BaseDocument, request: CaptureRequest) -> CaptureResponse {
     let target_node_id = request.node_id;
+    let output_path = request.output_path;
+
     match capture_document_node_png(doc, target_node_id) {
         Ok((width, height, node_id, png_bytes)) => {
-            use base64::prelude::*;
-            let data_base64 = BASE64_STANDARD.encode(&png_bytes);
+            let target_file = std::path::Path::new(&output_path);
+            if let Some(parent) = target_file.parent() {
+                if !parent.as_os_str().is_empty() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        return CaptureResponse {
+                            success: false,
+                            file_path: output_path,
+                            width: 0,
+                            height: 0,
+                            format: "png".to_string(),
+                            node_id: target_node_id,
+                            bytes: 0,
+                            message: Some(format!("Failed to create parent directory: {e}")),
+                        };
+                    }
+                }
+            }
+
+            if let Err(e) = std::fs::write(target_file, &png_bytes) {
+                return CaptureResponse {
+                    success: false,
+                    file_path: output_path,
+                    width: 0,
+                    height: 0,
+                    format: "png".to_string(),
+                    node_id: target_node_id,
+                    bytes: 0,
+                    message: Some(format!("Failed to write capture to file: {e}")),
+                };
+            }
+
             let message = if let Some(nid) = node_id {
                 format!(
-                    "Captured node #{nid} cropped to {width}x{height} PNG visual screenshot ({} bytes)",
+                    "Captured node #{nid} cropped to {width}x{height} PNG visual screenshot to {output_path} ({} bytes)",
                     png_bytes.len()
                 )
             } else {
                 format!(
-                    "Captured {width}x{height} PNG visual screenshot ({} bytes)",
+                    "Captured {width}x{height} PNG visual screenshot to {output_path} ({} bytes)",
                     png_bytes.len()
                 )
             };
+
             CaptureResponse {
                 success: true,
+                file_path: output_path,
                 width,
                 height,
                 format: "png".to_string(),
-                data_base64,
                 node_id,
+                bytes: png_bytes.len(),
                 message: Some(message),
             }
         }
         Err(err) => CaptureResponse {
             success: false,
+            file_path: output_path,
             width: 0,
             height: 0,
             format: "png".to_string(),
-            data_base64: String::new(),
             node_id: target_node_id,
+            bytes: 0,
             message: Some(err),
         },
     }

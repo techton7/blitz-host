@@ -91,9 +91,16 @@ mod tests {
         let (tx, rx) = channel::<ControlBridgeRequest>();
         let mut bridge = HostBridge::new(rx);
 
+        let test_output_file = "target/test_bridge_full.png";
+        let _ = std::fs::remove_file(test_output_file);
+
         let (cap_resp_tx, cap_resp_rx) = sync_channel(1);
         tx.send(ControlBridgeRequest {
-            request: ControlRequest::Capture(CaptureRequest::default()),
+            request: ControlRequest::Capture(CaptureRequest {
+                window_id: None,
+                node_id: None,
+                output_path: test_output_file.to_string(),
+            }),
             reply: cap_resp_tx,
         }).unwrap();
 
@@ -107,12 +114,13 @@ mod tests {
             ControlResponse::CaptureSuccess(cap) => {
                 assert!(cap.success);
                 assert_eq!(cap.format, "png");
+                assert_eq!(cap.file_path, test_output_file);
                 assert_eq!(cap.width, width);
                 assert_eq!(cap.height, height);
                 assert_eq!(cap.node_id, None);
-                use base64::prelude::*;
-                let decoded = BASE64_STANDARD.decode(&cap.data_base64).unwrap();
-                assert_eq!(decoded, png_bytes);
+                assert_eq!(cap.bytes, png_bytes.len());
+                let disk_bytes = std::fs::read(test_output_file).expect("file must exist on disk");
+                assert_eq!(disk_bytes, png_bytes);
             }
             other => panic!("expected CaptureSuccess, got {other:?}"),
         }
@@ -123,6 +131,7 @@ mod tests {
             request: ControlRequest::Capture(CaptureRequest {
                 window_id: None,
                 node_id: Some(999999),
+                output_path: "target/test_bridge_nonexistent.png".to_string(),
             }),
             reply: node_resp_tx,
         }).unwrap();

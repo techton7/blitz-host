@@ -293,33 +293,42 @@ Per `instruction.md` Section 6, this is explicitly a **crop-based capture (`full
 
 ---
 
-## 9. CLI Ergonomization, Always-On JSON, Mandatory `-o`, and Metadata JSON
+## 9. Complete Removal of `data_base64` and File-Oriented Capture Architecture
 
-### 9.1 What Public Surface Changed
-1. **Always-On JSON Protocol**:
+### 9.1 What Contract and Architectural Surface Changed
+1. **Total Removal of `data_base64` from Supported Capture Contract**:
+   - `data_base64` was completely eliminated from `CaptureResponse` in `blitz-host-protocol`.
+   - `base64` crate dependencies were removed from `blitz-host-protocol`, `blitz-host-transport`, `blitz-host-bridge`, and `blitz-host`.
+   - The IPC wire contract no longer transmits, encodes, or decodes base64 strings.
+2. **File-Oriented `CaptureRequest` & Internal Artifact Flow**:
+   - `CaptureRequest` now requires `output_path: String`.
+   - `DebugClient` resolves relative paths to absolute strings before dispatching over UDS.
+   - The host runtime (`blitz-host-bridge::capture_document`) rasterizes the scene directly into raw PNG bytes, creates parent directories if needed, and writes the artifact directly to the destination path using `std::fs::write`.
+   - The host returns pure metadata in `CaptureResponse`:
+     - `success: bool`
+     - `file_path: String`
+     - `width: u32`
+     - `height: u32`
+     - `format: String` ("png")
+     - `node_id: Option<u64>`
+     - `bytes: usize`
+     - `message: Option<String>`
+3. **Mandatory `-o` / `--output` on CLI**:
+   - `blitz-host capture` strictly enforces `-o <PATH>` / `--output <PATH>` for all invocations (full-window, positional `<NODE_ID>`, and `--node <NODE_ID>`).
+   - Omitting `-o` immediately fails with exit code `1` and explains the requirement on `stderr`.
+   - Default filename fallback generation (`blitz-capture-<PID>.png`) is completely removed.
+4. **Always-On JSON Protocol Across CLI Subcommands**:
    - The `--json` flag was removed from all CLI subcommands (`list`, `inspect`, `capture`, `click`, `focus`, `set-value`, `key`, `mouse *`).
-   - `stdout` is now reserved strictly for valid, pretty-printed JSON payloads across all subcommands.
-   - All diagnostic, connection, and VSync settle progress logs were redirected to `stderr` (`eprintln!`), guaranteeing that `stdout` is pipeable to `jq` or AI agent tool parsers without corruption.
-2. **Mandatory Output Path for `capture` (`-o` / `--output`)**:
-   - `-o <PATH>` / `--output <PATH>` is now strictly required for all `capture` invocations (both full-window and node crop).
-   - Omitting `-o` immediately fails with exit code `1` and a clear error message.
-   - Ambiguous default fallback filenames (e.g. `blitz-capture-<PID>.png`) and scattered disk artifacts are completely eliminated.
-3. **Removal of Inline Base64 from Public JSON Response**:
-   - The public CLI response no longer dumps raw `data_base64` image strings to stdout.
-   - `capture` writes the image bytes directly to the mandatory `-o` file path on disk, and emits lightweight `CaptureMetadataResponse` JSON.
-4. **Compound Key Specification (`key`)**:
-   - Removed separate modifier flags (`--shift`, `--ctrl`, `--alt`, `--meta`, `--cmd`).
-   - Added compound key parser supporting `+` delimiter (e.g. `cmd+a`, `command+shift+z`, `shift+tab`, `enter`, `escape`, `ctrl+c`).
-   - Modifiers (`cmd`, `command`, `meta`, `super`, `shift`, `ctrl`, `control`, `alt`, `opt`, `option`) and named keys (`tab`, `enter`, `return`, `esc`, `escape`, `backspace`, `del`, `delete`, `space`, `arrow*`) are matched case-insensitively.
-5. **`mouse` Namespace Hierarchy**:
-   - Grouped pointer interactions under `blitz-host mouse <move|down|up|wheel|drag>`, cleaning up top-level CLI namespace pollution.
-   - Maintained top-level `move`, `down`, `up`, `wheel`, `drag` as backward-compatible aliases.
-6. **Hierarchical `--help` / `-h` Documentation**:
-   - Added consolidated `blitz-host mouse --help` namespace documentation.
-   - Updated main help and individual subcommand help manuals to reflect compound keys and default JSON format.
+   - `stdout` is reserved strictly for valid JSON payloads across all subcommands.
+   - All progress, connection, and VSync settle logs route to `stderr` (`eprintln!`).
+5. **Compound Key Specification (`key`)**:
+   - Removed separate modifier flags; `key` accepts compound specifiers like `cmd+a`, `command+shift+z`, `shift+tab`, `enter`.
+   - Handled case-insensitively in `dioxus-native-dom`.
+6. **`mouse` Namespace Hierarchy**:
+   - Grouped pointer interactions under `blitz-host mouse <move|down|up|wheel|drag>` with top-level aliases retained.
 
 ### 9.2 Public Metadata JSON Format
-The `blitz-host capture` command now outputs strictly typed metadata JSON on `stdout`:
+The `blitz-host capture` command outputs strictly typed metadata JSON on `stdout`:
 ```json
 {
   "success": true,
@@ -329,21 +338,30 @@ The `blitz-host capture` command now outputs strictly typed metadata JSON on `st
   "format": "png",
   "nodeId": 4294967464,
   "bytes": 7443,
-  "message": "Captured node #4294967464 cropped to 618x40 PNG visual screenshot (7443 bytes)"
+  "message": "Captured node #4294967464 cropped to 618x40 PNG visual screenshot to target/cli_proof_node_card.png (7443 bytes)"
 }
 ```
+Image bytes are written directly to disk; no inline image data is embedded in JSON.
 
-### 9.3 Live Validation Evidence
-1. **Live Native Host E2E Suite (`crates/blitz-host-transport/tests/live_inspect.rs` Step 13)**:
-   - `blitz-host list` verified: produces valid JSON array containing live host PID.
-   - `blitz-host inspect` verified: produces valid JSON object with `documentId: 1`.
-   - `blitz-host key cmd+a` verified: dispatches compound shortcut with `success: true`.
-   - `blitz-host mouse move` verified: dispatches pointer movement via namespace with `success: true`.
-   - `blitz-host capture` without `-o` verified: exits with code `1` and explains `-o` requirement.
-   - `blitz-host capture 4294967464 -o target/cli_proof_node_card.png` verified: writes valid PNG to disk and outputs metadata JSON with no `dataBase64` property.
-2. **Automated Suite Results**:
-   - `cargo test --manifest-path util/blitz-host/Cargo.toml -- --nocapture`: `ok. 7 passed; 0 failed`.
-   - `cargo test --manifest-path blitz/Cargo.toml -p dioxus-native-dom -- test_synthetic`: `ok. 3 passed; 0 failed`.
+### 9.3 Validation Actually Run
+1. **Full Workspace Test Suite**:
+   ```bash
+   cargo test --manifest-path util/blitz-host/Cargo.toml -- --nocapture
+   ```
+   - **`blitz-host-protocol`**: `test_control_envelope_serde_roundtrip` verifies roundtrip serialization of `CaptureRequest` and `CaptureResponse` with `!contains("dataBase64")`.
+   - **`blitz-host-bridge`**: `test_bridge_capture_document` verifies host writes raw PNG bytes directly to `output_path` and matches disk content byte-for-byte.
+   - **`blitz-host-transport` & `live_inspect`**:
+     - Step 11: Full-window capture writes `target/live_proof_artifact.png` (800x600, 146,754 bytes).
+     - Step 12: Node capture writes `target/live_proof_node_card.png` (618x40, 7,443 bytes).
+     - Step 13.5: Missing `-o` exits with code 1 and error message on `stderr`.
+     - Step 13.6: Full-window CLI capture with `-o target/cli_proof_full_window.png` writes valid PNG and returns metadata JSON with `nodeId: null` and without `dataBase64`.
+     - Step 13.7: Positional node capture with `-o target/cli_proof_node_card.png` writes valid PNG and returns metadata JSON.
+     - Step 13.8: Flagged `--node` capture with `-o target/cli_proof_node_card_flag.png` writes valid PNG and returns metadata JSON.
+2. **Headless Engine Synthetic Suite**:
+   ```bash
+   cargo test --manifest-path blitz/Cargo.toml -p dioxus-native-dom -- test_synthetic
+   ```
+   - Passed 3 tests: focus/input, pointer, compound keyboard events.
 
 ### 9.4 What Remains Deferred
 1. **Multi-touch Gestures**: Pinch-to-zoom and multi-finger pan remain deferred.

@@ -19,11 +19,11 @@ This specification establishes the canonical CLI design and UX improvements for 
 - **Unified JSON Response Envelopes**:
   - `list`: JSON array of `HostDescriptor` objects `[ { "pid": ..., ... }, ... ]`.
   - `inspect`: Pure `InspectResponse` JSON object.
-  - `capture`: Compact JSON object with `outputPath` and dimensions (no massive base64 in stdout; image bytes written directly to the mandatory `-o` path):
+  - `capture`: Compact metadata JSON object with `filePath` and dimensions (no base64 in stdout; image bytes written directly to the mandatory `-o` path):
     ```json
     {
       "success": true,
-      "outputPath": "target/card.png",
+      "filePath": "target/card.png",
       "width": 618,
       "height": 40,
       "format": "png",

@@ -340,8 +340,8 @@ pub struct SettleResponse {
     pub current_frame: u64,
 }
 
-/// Request to capture a visual screenshot of the rendered document/window.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Request to capture a visual screenshot and write the artifact to disk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureRequest {
     /// Optional target window handle (falls back to primary window if None).
@@ -350,34 +350,14 @@ pub struct CaptureRequest {
     /// Optional target node handle (if specified, crops the capture to this node's visual bounds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<u64>,
-}
-
-/// Result of capturing a visual screenshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CaptureResponse {
-    /// Whether capture was successful.
-    pub success: bool,
-    /// Rendered image width in physical pixels.
-    pub width: u32,
-    /// Rendered image height in physical pixels.
-    pub height: u32,
-    /// Image format (e.g. "png").
-    pub format: String,
-    /// Base64-encoded image payload bytes.
-    pub data_base64: String,
-    /// Target node ID that was cropped, if requested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<u64>,
-    /// Optional status or failure message.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
+    /// Target file path where the captured image artifact must be written.
+    pub output_path: String,
 }
 
 /// Metadata result of capturing a visual screenshot to a file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CaptureMetadataResponse {
+pub struct CaptureResponse {
     /// Whether capture was successful.
     pub success: bool,
     /// Absolute or relative path to the saved PNG file on disk.
@@ -397,6 +377,9 @@ pub struct CaptureMetadataResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
+
+/// Type alias for backward compatibility.
+pub type CaptureMetadataResponse = CaptureResponse;
 
 /// Top-level control request envelope forwarded across the transport.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -555,10 +538,12 @@ mod tests {
         let cap_req = ControlRequest::Capture(CaptureRequest {
             window_id: Some(99),
             node_id: Some(42),
+            output_path: "target/test.png".into(),
         });
         let cap_req_json = serde_json::to_string(&cap_req).unwrap();
         assert!(cap_req_json.contains("\"type\":\"capture\""));
         assert!(cap_req_json.contains("\"nodeId\":42"));
+        assert!(cap_req_json.contains("\"outputPath\":\"target/test.png\""));
         let cap_req_parsed: ControlRequest = serde_json::from_str(&cap_req_json).unwrap();
         assert_eq!(cap_req, cap_req_parsed);
 
@@ -664,15 +649,19 @@ mod tests {
 
         let cap_resp = ControlResponse::CaptureSuccess(CaptureResponse {
             success: true,
+            file_path: "target/screenshot.png".into(),
             width: 800,
             height: 600,
             format: "png".into(),
-            data_base64: "iVBORw0KGgoAAAANSUhEUg==".into(),
             node_id: None,
+            bytes: 12345,
             message: Some("Screenshot captured".into()),
         });
         let cap_resp_json = serde_json::to_string(&cap_resp).unwrap();
         assert!(cap_resp_json.contains("\"status\":\"captureSuccess\""));
+        assert!(cap_resp_json.contains("\"filePath\":\"target/screenshot.png\""));
+        assert!(cap_resp_json.contains("\"bytes\":12345"));
+        assert!(!cap_resp_json.contains("dataBase64"));
         let cap_resp_parsed: ControlResponse = serde_json::from_str(&cap_resp_json).unwrap();
         assert_eq!(cap_resp, cap_resp_parsed);
     }

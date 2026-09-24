@@ -3,7 +3,6 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use base64::prelude::*;
 use blitz_host_protocol::{
     ActionRequest, ActionResponse, CaptureRequest, CaptureResponse, ControlRequest,
     ControlResponse, HostDescriptor, InspectRequest, InspectResponse, KeyModifiers,
@@ -341,9 +340,22 @@ impl DebugClient {
         }
     }
 
-    /// Capture visual screenshot of the document/window on the default/primary window.
-    pub fn capture(&mut self) -> io::Result<CaptureResponse> {
-        self.capture_window(None)
+    fn resolve_output_path(path: impl AsRef<Path>) -> String {
+        let p = path.as_ref();
+        if p.is_absolute() {
+            p.to_string_lossy().to_string()
+        } else {
+            match std::env::current_dir() {
+                Ok(cwd) => cwd.join(p).to_string_lossy().to_string(),
+                Err(_) => p.to_string_lossy().to_string(),
+            }
+        }
+    }
+
+    /// Capture visual screenshot of the document/window on the default/primary window,
+    /// writing the PNG artifact directly to `output_path`.
+    pub fn capture(&mut self, output_path: impl AsRef<Path>) -> io::Result<CaptureResponse> {
+        self.capture_window(None, output_path)
     }
 
     /// Capture visual screenshot with explicit [`CaptureRequest`] parameters.
@@ -357,65 +369,63 @@ impl DebugClient {
         }
     }
 
-    /// Capture visual screenshot of the document/window on a targeted window (or primary if None).
-    pub fn capture_window(&mut self, window_id: Option<u64>) -> io::Result<CaptureResponse> {
+    /// Capture visual screenshot of the document/window on a targeted window (or primary if None),
+    /// writing the PNG artifact directly to `output_path`.
+    pub fn capture_window(
+        &mut self,
+        window_id: Option<u64>,
+        output_path: impl AsRef<Path>,
+    ) -> io::Result<CaptureResponse> {
+        let resolved = Self::resolve_output_path(output_path);
         self.capture_request(CaptureRequest {
             window_id,
             node_id: None,
+            output_path: resolved,
         })
     }
 
-    /// Capture visual screenshot cropped to a specific target node's visual bounds.
-    pub fn capture_node(&mut self, node_id: u64) -> io::Result<CaptureResponse> {
+    /// Capture visual screenshot cropped to a specific target node's visual bounds,
+    /// writing the PNG artifact directly to `output_path`.
+    pub fn capture_node(
+        &mut self,
+        node_id: u64,
+        output_path: impl AsRef<Path>,
+    ) -> io::Result<CaptureResponse> {
+        let resolved = Self::resolve_output_path(output_path);
         self.capture_request(CaptureRequest {
             window_id: None,
             node_id: Some(node_id),
+            output_path: resolved,
         })
     }
 
-    /// Capture visual screenshot of a specific node on a targeted window.
+    /// Capture visual screenshot of a specific node on a targeted window,
+    /// writing the PNG artifact directly to `output_path`.
     pub fn capture_window_node(
         &mut self,
         window_id: Option<u64>,
         node_id: Option<u64>,
+        output_path: impl AsRef<Path>,
     ) -> io::Result<CaptureResponse> {
-        self.capture_request(CaptureRequest { window_id, node_id })
-    }
-
-    /// Capture visual screenshot and decode into raw PNG image bytes.
-    pub fn capture_png(&mut self) -> io::Result<Vec<u8>> {
-        let resp = self.capture()?;
-        if !resp.success {
-            return Err(io::Error::other(
-                resp.message.unwrap_or_else(|| "Capture failed without message".into()),
-            ));
-        }
-        BASE64_STANDARD
-            .decode(&resp.data_base64)
-            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))
+        let resolved = Self::resolve_output_path(output_path);
+        self.capture_request(CaptureRequest {
+            window_id,
+            node_id,
+            output_path: resolved,
+        })
     }
 
     /// Capture visual screenshot and write directly to `path`.
     ///
     /// Returns `(width, height, path)` on success.
     pub fn capture_to_file(&mut self, path: impl AsRef<Path>) -> io::Result<(u32, u32, PathBuf)> {
-        let resp = self.capture()?;
+        let resp = self.capture(&path)?;
         if !resp.success {
             return Err(io::Error::other(
                 resp.message.unwrap_or_else(|| "Capture failed without message".into()),
             ));
         }
-        let png_bytes = BASE64_STANDARD
-            .decode(&resp.data_base64)
-            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))?;
-
-        let target_path = path.as_ref().to_path_buf();
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&target_path, &png_bytes)?;
-
-        Ok((resp.width, resp.height, target_path))
+        Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
     }
 
     /// Capture visual screenshot of a specific node and write directly to `path`.
@@ -426,24 +436,14 @@ impl DebugClient {
         node_id: u64,
         path: impl AsRef<Path>,
     ) -> io::Result<(u32, u32, PathBuf)> {
-        let resp = self.capture_node(node_id)?;
+        let resp = self.capture_node(node_id, &path)?;
         if !resp.success {
             return Err(io::Error::other(
                 resp.message
                     .unwrap_or_else(|| format!("Capture of node #{node_id} failed without message")),
             ));
         }
-        let png_bytes = BASE64_STANDARD
-            .decode(&resp.data_base64)
-            .map_err(|e| io::Error::other(format!("Failed to decode base64 PNG data: {e}")))?;
-
-        let target_path = path.as_ref().to_path_buf();
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&target_path, &png_bytes)?;
-
-        Ok((resp.width, resp.height, target_path))
+        Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
     }
 
     /// Settle and inspect iteratively until `condition` is satisfied or `timeout` expires.

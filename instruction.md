@@ -1,4 +1,4 @@
-# Worker Instruction: Simplify `capture` to Required File Output + Metadata JSON Only
+# Worker Instruction: Finish the `capture` Simplification for Real (Remove Inline Base64 Completely)
 
 You are working in:
 
@@ -6,11 +6,13 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The current capture lane works, but its interface is still too heavy.
+The previous pass made capture green, but it did **not** fully satisfy the requested contract simplification.
 
-The new direction is fixed:
+The current problem is:
 
-> **`capture` should always require an output file path and should return metadata JSON only — no inline base64 payloads, no fallback behavior**
+> **`data_base64` is still present in the protocol, bridge, client, tests, and result narrative**
+
+This pass must remove that, not just hide it.
 
 Write all agent-facing reasoning in English.
 
@@ -27,123 +29,127 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Simplify the `blitz-host capture` contract so that it behaves like a clean artifact-producing command.
+Finish the `capture` contract simplification completely.
 
-The intended model is:
+The intended end-state is:
 
-1. user must provide `-o/--output <FILE>`
-2. capture always writes the artifact to disk
-3. stdout returns only metadata JSON
-4. inline base64 image payload support is removed
+1. `capture` always requires `-o/--output`
+2. the public JSON response is metadata-only
+3. inline base64 image payloads are removed from the supported contract entirely
 
-This applies to both:
+That means:
 
-1. full-window capture
-2. node/subtree crop capture
+> not just “CLI hides base64,” but “the contract no longer revolves around `data_base64`.”
 
 ---
 
-## 2. Required Changes
+## 2. What Is Still Wrong
 
-### A. CLI behavior
+The previous state is insufficient because:
 
-Update the `blitz-host capture` command so that:
+1. `CaptureResponse.data_base64` still exists
+2. bridge code still base64-encodes PNG bytes
+3. client helpers still decode `resp.data_base64`
+4. tests still assert on `data_base64.len()`
+5. result text still describes base64-based responses
 
-1. `-o/--output` is **required**
-2. omitting it is a usage error
-3. there is no default fallback filename generation
-4. there is no inline-image-on-stdout behavior
+That is not the requested simplified model.
 
-The CLI should clearly communicate the requirement in its help output and errors.
+---
 
-### B. JSON output contract
+## 3. Required Contract
 
-The JSON output should remain always-on, but it should be **metadata JSON only**.
+The public capture contract must become:
 
-Reasonable fields include:
+### CLI
+
+```bash
+blitz-host capture ... -o <FILE>
+```
+
+with:
+
+1. required `-o/--output`
+2. metadata JSON on `stdout`
+3. actual image bytes written to the requested file path
+
+### Public JSON
+
+The returned JSON should describe the artifact, for example:
 
 1. `success`
-2. `width`
-3. `height`
-4. `format`
-5. `filePath`
-6. `nodeId` or equivalent when node capture is used
-7. `message`
+2. `filePath`
+3. `width`
+4. `height`
+5. `format`
+6. `nodeId`
+7. `bytes`
+8. `message`
 
-The image bytes themselves should not be included in the JSON response.
-
-### C. Client / protocol surface
-
-If the current wire model is built around base64 image data:
-
-1. remove or deprecate that inline payload
-2. align client APIs with file-oriented or raw-byte-oriented internal behavior as appropriate
-3. make sure the public story is consistent with the CLI simplification
-
-Do not leave hidden legacy payloads pretending to still be part of the supported contract if they are not.
+The actual PNG data should **not** be embedded in the JSON.
 
 ---
 
-## 3. Explicitly Remove
+## 4. Required Removal
 
-Remove these behaviors from the current supported `capture` story:
+Remove `data_base64` from the supported capture contract.
 
-1. `data_base64` in the public JSON response
-2. `--json` meaning “inline the PNG blob”
-3. default file path fallback behavior for `capture`
+That means you must inspect and update all relevant layers:
 
-If internal helpers still need raw bytes before file write, that is fine.
+1. protocol types
+2. bridge response assembly
+3. client helpers
+4. CLI plumbing
+5. tests
+6. result/docs
 
-The point is:
+If internal code still needs raw bytes temporarily before writing the file, that is fine.
 
-> the **public contract** should be file artifact + metadata JSON only.
-
----
-
-## 4. What Not to Break
-
-Do not break:
-
-1. full-window capture functionality
-2. node/subtree crop capture functionality
-3. the rest of the control-plane proof path
-4. deterministic JSON stdout behavior
-
-The simplification should change interface shape, not actual capture correctness.
+But the public response and public flow must no longer expose or rely on base64 image payloads.
 
 ---
 
-## 5. Files / Areas to Reinspect
+## 5. What Not to Do
+
+1. do not merely stop printing base64 while keeping it as the hidden contract center
+2. do not leave legacy fields in types “just in case”
+3. do not weaken tests so the issue disappears without the contract actually changing
+
+This pass is about removing the old model, not cosmetically papering over it.
+
+---
+
+## 6. Files / Areas to Reinspect
 
 At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
 3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-protocol/`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-bridge/`
 6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-7. any capture-specific helpers in the bridge/client layers
+7. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
 
 ---
 
-## 6. Validation You Must Run
+## 7. Validation You Must Run
 
-Run the smallest commands that prove the simpler contract works.
+Run the smallest commands that prove the simplified contract is real.
 
 At minimum:
 
-1. validate `blitz-host capture -o <FILE>` for full-window capture
-2. validate `blitz-host capture --node <ID> -o <FILE>` (or equivalent) for node/subtree capture
-3. confirm stdout is valid metadata JSON only
-4. confirm no inline base64 payload remains in the public CLI contract
-5. rerun the relevant test suite(s) so the simplified capture interface remains green
+1. rerun the `blitz-host` suite
+2. validate full-window capture with required `-o`
+3. validate node/subtree capture with required `-o`
+4. confirm metadata JSON no longer contains inline image payload
+5. confirm existing capture functionality still works
 
 If markdown files are edited, validate them.
 
 ---
 
-## 7. `result.md` Requirement
+## 8. `result.md` Requirement
 
 Update:
 
@@ -151,23 +157,22 @@ Update:
 
 It must explicitly record:
 
-1. what public capture surface changed
-2. that `-o/--output` is now required
-3. that inline base64 JSON payload support was removed
-4. what metadata JSON now looks like
-5. what validation proved the new contract
-6. what remains deferred
+1. that `data_base64` was removed from the supported capture contract
+2. what the new metadata-only JSON looks like
+3. what internal flow now writes the artifact
+4. what validation proved the change
+5. what remains deferred
 
 ---
 
-## 8. Final Verdict Rule
+## 9. Final Verdict Rule
 
 You may report **Implemented and simplified** only if:
 
-1. `capture` requires an explicit output path
-2. metadata JSON remains valid and useful
-3. inline base64 output is removed from the public contract
-4. capture still works for full-window and node/subtree cases
+1. `data_base64` no longer exists as part of the supported public capture contract
+2. metadata JSON is the only stdout payload
+3. required `-o/--output` works for both full-window and node capture
+4. existing capture functionality still works
 
 Otherwise report:
 
@@ -177,4 +182,4 @@ or
 
 The purpose of this pass is:
 
-> make `capture` a clean artifact-producing command instead of a mixed file/blob interface.
+> finish the capture API simplification all the way, not halfway.
