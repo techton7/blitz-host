@@ -550,12 +550,18 @@ fn parse_delta_args(args: &[String]) -> (f64, f64) {
     for i in 0..args.len() {
         if (args[i] == "--dx" || args[i] == "--delta-x") && i + 1 < args.len() {
             dx = args[i + 1].parse().unwrap_or(0.0);
-        } else if let Some(rest) = args[i].strip_prefix("--dx=").or_else(|| args[i].strip_prefix("--delta-x=")) {
+        } else if let Some(rest) = args[i]
+            .strip_prefix("--dx=")
+            .or_else(|| args[i].strip_prefix("--delta-x="))
+        {
             dx = rest.parse().unwrap_or(0.0);
         }
         if (args[i] == "--dy" || args[i] == "--delta-y") && i + 1 < args.len() {
             dy = args[i + 1].parse().unwrap_or(0.0);
-        } else if let Some(rest) = args[i].strip_prefix("--dy=").or_else(|| args[i].strip_prefix("--delta-y=")) {
+        } else if let Some(rest) = args[i]
+            .strip_prefix("--dy=")
+            .or_else(|| args[i].strip_prefix("--delta-y="))
+        {
             dy = rest.parse().unwrap_or(0.0);
         }
     }
@@ -576,7 +582,9 @@ fn parse_pid_arg(args: &[String]) -> Option<u32> {
 
 fn parse_target_flag(args: &[String]) -> Option<ElementTarget> {
     for i in 0..args.len() {
-        if (args[i] == "--selector" || args[i] == "-s" || args[i] == "--node" || args[i] == "-n") && i + 1 < args.len() {
+        if (args[i] == "--selector" || args[i] == "-s" || args[i] == "--node" || args[i] == "-n")
+            && i + 1 < args.len()
+        {
             return Some(ElementTarget::from(args[i + 1].as_str()));
         }
         if let Some(rest) = args[i]
@@ -629,6 +637,10 @@ fn parse_output_arg(args: &[String]) -> Option<PathBuf> {
     None
 }
 
+fn is_explicit_descriptor_or_socket(arg: &str) -> bool {
+    arg.ends_with(".json") || arg.ends_with(".sock") || arg.starts_with(r"\\.\pipe\")
+}
+
 fn determine_selector(args: &[String]) -> TargetSelector {
     if let Some(pid) = parse_pid_arg(args) {
         return TargetSelector::Pid(pid);
@@ -665,7 +677,7 @@ fn determine_selector(args: &[String]) -> TargetSelector {
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             return TargetSelector::ExplicitPath(PathBuf::from(arg));
         }
     }
@@ -683,7 +695,6 @@ fn connect_cli_client(selector: &TargetSelector) -> DebugClient {
         }
     }
 }
-
 
 /// Helper to parse compound key expressions like `cmd+a`, `command+shift+z`, `shift+tab`.
 fn parse_compound_key(raw: &str) -> (String, Option<KeyModifiers>) {
@@ -767,14 +778,14 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
-    let target = parse_target_flag(subargs)
-        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+    let target =
+        parse_target_flag(subargs).or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -783,7 +794,9 @@ fn handle_move_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
     };
 
     if target.is_none() && coords.is_none() {
-        eprintln!("Error: 'move' requires either a target <TARGET> (node ID or CSS selector) or coordinates (--x and --y).");
+        eprintln!(
+            "Error: 'move' requires either a target <TARGET> (node ID or CSS selector) or coordinates (--x and --y)."
+        );
         eprintln!("Run 'blitz-host mouse move --help' for usage.");
         std::process::exit(1);
     }
@@ -852,14 +865,14 @@ fn handle_down_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
-    let target = parse_target_flag(subargs)
-        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+    let target =
+        parse_target_flag(subargs).or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -933,14 +946,14 @@ fn handle_up_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Error
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
-    let target = parse_target_flag(subargs)
-        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+    let target =
+        parse_target_flag(subargs).or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -1020,14 +1033,14 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
-    let target = parse_target_flag(subargs)
-        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+    let target =
+        parse_target_flag(subargs).or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let (cx, cy) = parse_coords_arg(subargs);
     let coords = match (cx, cy) {
@@ -1037,7 +1050,9 @@ fn handle_wheel_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
     let (dx, dy) = parse_delta_args(subargs);
 
     if dy == 0.0 && dx == 0.0 {
-        eprintln!("Error: 'wheel' requires a non-zero scroll delta via '--dy <DELTA_Y>' or '--dx <DELTA_X>'.");
+        eprintln!(
+            "Error: 'wheel' requires a non-zero scroll delta via '--dy <DELTA_Y>' or '--dx <DELTA_X>'."
+        );
         eprintln!("Run 'blitz-host mouse wheel --help' for usage.");
         std::process::exit(1);
     }
@@ -1091,14 +1106,16 @@ fn handle_drag_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Err
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
     if positional.len() < 2 {
-        eprintln!("Error: 'drag' requires <FROM_TARGET> and <TO_TARGET> positional arguments (node IDs or CSS selectors).");
+        eprintln!(
+            "Error: 'drag' requires <FROM_TARGET> and <TO_TARGET> positional arguments (node IDs or CSS selectors)."
+        );
         eprintln!("Run 'blitz-host mouse drag --help' for usage.");
         std::process::exit(1);
     }
@@ -1164,19 +1181,21 @@ fn handle_click_command(subargs: &[String]) -> Result<(), Box<dyn std::error::Er
         {
             continue;
         }
-        if arg.ends_with(".json") || arg.ends_with(".sock") {
+        if is_explicit_descriptor_or_socket(arg) {
             continue;
         }
         positional.push(arg.as_str());
     }
 
-    let target = parse_target_flag(subargs)
-        .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+    let target =
+        parse_target_flag(subargs).or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
 
     let target = match target {
         Some(t) => t,
         None => {
-            eprintln!("Error: 'click' requires a target <TARGET> argument (node ID or CSS selector).");
+            eprintln!(
+                "Error: 'click' requires a target <TARGET> argument (node ID or CSS selector)."
+            );
             eprintln!("Run 'blitz-host mouse click --help' for usage.");
             std::process::exit(1);
         }
@@ -1274,8 +1293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     || arg.starts_with("--window=")
                     || arg.starts_with("--window-id=")
                     || arg.starts_with('-')
-                    || arg.ends_with(".sock")
-                    || arg.ends_with(".json")
+                    || is_explicit_descriptor_or_socket(arg)
                 {
                     continue;
                 }
@@ -1310,7 +1328,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::write(&target_file, &json_str).map_err(|e| {
                     std::io::Error::new(
                         e.kind(),
-                        format!("Failed to write inspection output to {}: {e}", target_file.display()),
+                        format!(
+                            "Failed to write inspection output to {}: {e}",
+                            target_file.display()
+                        ),
                     )
                 })?;
 
@@ -1351,7 +1372,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let target_file = match output_path {
                 Some(p) => p,
                 None => {
-                    eprintln!("Error: Output path is required. Use '-o <PATH>' or '--output <PATH>' to specify where to save the screenshot.");
+                    eprintln!(
+                        "Error: Output path is required. Use '-o <PATH>' or '--output <PATH>' to specify where to save the screenshot."
+                    );
                     eprintln!("Run 'blitz-host capture --help' for usage.");
                     std::process::exit(1);
                 }
@@ -1381,7 +1404,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     skip_next = true;
                     continue;
                 }
-                if arg.starts_with('-') || arg.ends_with(".sock") || arg.ends_with(".json") {
+                if arg.starts_with('-') || is_explicit_descriptor_or_socket(arg) {
                     continue;
                 }
                 positional.push(arg.as_str());
@@ -1452,7 +1475,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     continue;
                 }
-                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                if is_explicit_descriptor_or_socket(arg) {
                     continue;
                 }
                 positional.push(arg.as_str());
@@ -1464,7 +1487,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let target = match target {
                 Some(t) => t,
                 None => {
-                    eprintln!("Error: 'focus' requires a target <TARGET> argument (node ID or CSS selector).");
+                    eprintln!(
+                        "Error: 'focus' requires a target <TARGET> argument (node ID or CSS selector)."
+                    );
                     eprintln!("Run 'blitz-host focus --help' for usage.");
                     std::process::exit(1);
                 }
@@ -1528,7 +1553,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     continue;
                 }
-                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                if is_explicit_descriptor_or_socket(arg) {
                     continue;
                 }
                 positional.push(arg.as_str());
@@ -1542,7 +1567,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 None => {
                     if positional.is_empty() {
-                        eprintln!("Error: 'set-value' requires target <TARGET> and <VALUE> arguments (e.g. '#test-input' 'hello').");
+                        eprintln!(
+                            "Error: 'set-value' requires target <TARGET> and <VALUE> arguments (e.g. '#test-input' 'hello')."
+                        );
                         eprintln!("Run 'blitz-host set-value --help' for usage.");
                         std::process::exit(1);
                     }
@@ -1615,14 +1642,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     continue;
                 }
-                if arg.ends_with(".json") || arg.ends_with(".sock") {
+                if is_explicit_descriptor_or_socket(arg) {
                     continue;
                 }
                 positional.push(arg.as_str());
             }
 
             if positional.is_empty() {
-                eprintln!("Error: 'key' requires a <KEY_SPEC> argument (e.g. cmd+a, shift+tab, enter, escape).");
+                eprintln!(
+                    "Error: 'key' requires a <KEY_SPEC> argument (e.g. cmd+a, shift+tab, enter, escape)."
+                );
                 eprintln!("Run 'blitz-host key --help' for usage.");
                 std::process::exit(1);
             }
@@ -1673,18 +1702,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return Ok(());
                 }
                 other => {
-                    eprintln!("Unknown mouse subcommand: '{other}'. Use 'blitz-host mouse --help' for available subcommands.");
+                    eprintln!(
+                        "Unknown mouse subcommand: '{other}'. Use 'blitz-host mouse --help' for available subcommands."
+                    );
                     std::process::exit(1);
                 }
             }
             Ok(())
         }
         "click" | "move" | "down" | "up" | "wheel" | "drag" => {
-            eprintln!("Error: '{subcmd}' is a pointer command and belongs under the 'mouse' namespace. Run 'blitz-host mouse {subcmd} ...' instead.");
+            eprintln!(
+                "Error: '{subcmd}' is a pointer command and belongs under the 'mouse' namespace. Run 'blitz-host mouse {subcmd} ...' instead."
+            );
             std::process::exit(1);
         }
         other => {
-            eprintln!("Unknown subcommand: '{other}'. Use 'blitz-host --help' for available subcommands.");
+            eprintln!(
+                "Unknown subcommand: '{other}'. Use 'blitz-host --help' for available subcommands."
+            );
             std::process::exit(1);
         }
     }

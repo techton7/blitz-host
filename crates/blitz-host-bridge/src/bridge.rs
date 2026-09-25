@@ -48,7 +48,10 @@ impl HostBridge {
         &mut self,
         doc: &mut BaseDocument,
         current_frame: u64,
-        mut dispatch_action: impl FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
+        mut dispatch_action: impl FnMut(
+            &ActionRequest,
+            &mut BaseDocument,
+        ) -> Result<ActionResponse, String>,
     ) -> usize {
         let mut serviced = 0;
 
@@ -56,11 +59,13 @@ impl HostBridge {
         let mut remaining_settles = Vec::with_capacity(self.pending_settles.len());
         for settle in self.pending_settles.drain(..) {
             if current_frame >= settle.target_frame {
-                settle.bridge_req.respond(ControlResponse::SettleSuccess(SettleResponse {
-                    settled: true,
-                    frames_waited: settle.requested_frames,
-                    current_frame,
-                }));
+                settle
+                    .bridge_req
+                    .respond(ControlResponse::SettleSuccess(SettleResponse {
+                        settled: true,
+                        frames_waited: settle.requested_frames,
+                        current_frame,
+                    }));
                 serviced += 1;
             } else {
                 remaining_settles.push(settle);

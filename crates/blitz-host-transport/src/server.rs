@@ -1,17 +1,16 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use blitz_host_protocol::{ControlRequest, ControlResponse, HostDescriptor, PROTOCOL_VERSION};
+use interprocess::local_socket::{Listener, ListenerOptions, Stream, prelude::*};
 
-use crate::discovery::{descriptor_dir, write_descriptor};
+use crate::discovery::{descriptor_dir, socket_name_from_str, write_descriptor};
 use crate::waker::ServiceWaker;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,7 +29,7 @@ impl ControlBridgeRequest {
     }
 }
 
-/// Running debug control server listening on a local Unix Domain Socket.
+/// Running debug control server listening on a local IPC socket (Named Pipe on Windows, UDS on Unix).
 pub struct DebugServer {
     descriptor: HostDescriptor,
     descriptor_path: PathBuf,
@@ -41,7 +40,7 @@ pub struct DebugServer {
 }
 
 impl DebugServer {
-    /// Bind a local Unix Domain Socket and announce the host descriptor in $TMPDIR/blitz-host.
+    /// Bind a local IPC endpoint and announce the host descriptor in $TMPDIR/blitz-host.
     pub fn start(
         renderer: impl Into<String>,
         renderer_version: impl Into<String>,
@@ -49,12 +48,47 @@ impl DebugServer {
         let dir = descriptor_dir();
         fs::create_dir_all(&dir)?;
 
-        let instance_id = format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-        let socket_path = dir.join(format!("{}.sock", instance_id));
-        let _ = fs::remove_file(&socket_path);
+        let instance_id = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
 
-        let listener = UnixListener::bind(&socket_path)?;
-        fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
+        #[cfg(unix)]
+        let (socket_path, socket_name) = {
+            use interprocess::local_socket::{GenericFilePath, ToFsName};
+            let sp = dir.join(format!("{}.sock", instance_id));
+            let _ = fs::remove_file(&sp);
+            let name = sp.as_path().to_fs_name::<GenericFilePath>()?.into_owned();
+            (sp, name)
+        };
+
+        #[cfg(windows)]
+        let (socket_path, socket_name) = {
+            use interprocess::local_socket::{GenericNamespaced, ToNsName};
+            let pipe_name = format!("blitz-host-{}", instance_id);
+            let socket_path = PathBuf::from(format!(r"\\.\pipe\{}", pipe_name));
+            let name = pipe_name.to_ns_name::<GenericNamespaced>()?.into_owned();
+            (socket_path, name)
+        };
+
+        #[cfg(not(any(unix, windows)))]
+        let (socket_path, socket_name) = {
+            let sp = dir.join(format!("{}.sock", instance_id));
+            let name = socket_name_from_str(&sp.to_string_lossy())?.into_owned();
+            (sp, name)
+        };
+
+        let listener = ListenerOptions::new().name(socket_name).create_sync()?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
+        }
 
         let descriptor = HostDescriptor {
             protocol_version: PROTOCOL_VERSION,
@@ -75,12 +109,11 @@ impl DebugServer {
 
         let thread_shutdown = Arc::clone(&shutdown);
         let thread_waker = waker.clone();
-        let thread_listener = listener.try_clone()?;
 
         let thread = thread::Builder::new()
             .name("blitz-host-server".into())
             .spawn(move || {
-                server_loop(thread_listener, command_tx, thread_waker, thread_shutdown);
+                server_loop(listener, command_tx, thread_waker, thread_shutdown);
             })?;
 
         Ok((
@@ -118,7 +151,7 @@ impl DebugServer {
         Ok(())
     }
 
-    /// Socket path on disk.
+    /// Socket path on disk or Named Pipe address.
     pub fn socket_path(&self) -> &PathBuf {
         &self.socket_path
     }
@@ -129,12 +162,19 @@ impl DebugServer {
     }
 
     fn stop(&mut self) {
-        self.shutdown.store(true, Ordering::Release);
-        // Connect dummy stream to unblock listener.accept()
-        let _ = UnixStream::connect(&self.socket_path);
+        if self.shutdown.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        // Connect dummy stream to unblock listener.incoming()
+        if self.thread.is_some() {
+            if let Ok(name) = socket_name_from_str(&self.descriptor.socket_path) {
+                let _ = Stream::connect(name);
+            }
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        #[cfg(unix)]
         let _ = fs::remove_file(&self.socket_path);
         let _ = fs::remove_file(&self.descriptor_path);
     }
@@ -147,7 +187,7 @@ impl Drop for DebugServer {
 }
 
 fn server_loop(
-    listener: UnixListener,
+    listener: Listener,
     command_tx: SyncSender<ControlBridgeRequest>,
     waker: ServiceWaker,
     shutdown: Arc<AtomicBool>,
@@ -174,11 +214,15 @@ fn server_loop(
 }
 
 fn handle_connection(
-    stream: &mut UnixStream,
+    stream: &mut Stream,
     command_tx: SyncSender<ControlBridgeRequest>,
     waker: ServiceWaker,
 ) {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    use interprocess::TryClone;
+    let Ok(stream_clone) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(stream_clone);
     let mut line = String::new();
 
     while reader.read_line(&mut line).unwrap_or(0) > 0 {
@@ -200,9 +244,9 @@ fn handle_connection(
                     waker.wake();
                     match reply_rx.recv_timeout(REQUEST_TIMEOUT) {
                         Ok(resp) => resp,
-                        Err(RecvTimeoutError::Timeout) => {
-                            ControlResponse::Error("Host UI thread request timed out after 5s".into())
-                        }
+                        Err(RecvTimeoutError::Timeout) => ControlResponse::Error(
+                            "Host UI thread request timed out after 5s".into(),
+                        ),
                         Err(RecvTimeoutError::Disconnected) => {
                             ControlResponse::Error("Host UI thread bridge disconnected".into())
                         }

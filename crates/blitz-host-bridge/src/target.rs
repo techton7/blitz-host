@@ -66,7 +66,9 @@ fn resolve_selector_in_doc(doc: &BaseDocument, raw_sel: &str) -> Result<Option<u
             if let Some(matched_node) = doc.get_element_by_id(fallback_id) {
                 return Ok(Some(matched_node.as_u64()));
             }
-            Err(format!("Element matching selector '{trimmed}' not found in document"))
+            Err(format!(
+                "Element matching selector '{trimmed}' not found in document"
+            ))
         }
         Err(err) => {
             // If selector parsing failed (e.g. invalid CSS syntax), try bare element id fallback

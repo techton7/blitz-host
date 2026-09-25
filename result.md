@@ -1,196 +1,135 @@
-# Result: Inspect Output File (`-o`) & DOM-Standard Click Resolution Policy
+# Result: Windows Validation and Gap-Discovery for `blitz-host` & `oxidase` Native Lane
 
 ## 1. Current Repo Facts
 
-1. **`blitz-host` Control Plane Baseline**:
-   - `blitz-host` provides an out-of-process control plane and live DOM inspection harness for Blitz and Dioxus Native desktop applications over local Unix Domain Sockets (UDS).
-   - Core capabilities prior to this pass included: strict UDS discovery with dead PID reaping, host ambiguity guard (`len == 1` implicit auto-discovery, `len >= 2` requires `--pid`), polymorphic CSS selector targeting (`ElementTarget`), deterministic VSync settlement (`settle(n)`), visual full/cropped capture (`capture -o`), and mouse/keyboard action dispatching.
+1. **Host Environment**:
+   - Operating System: Windows 11 (x86_64-pc-windows-msvc)
+   - Python: Python 3.12.10 installed and registered in `PATH` & `PYTHON3` environment variables.
+   - Workspace Synced from macOS via Mutagen:
+     - `util/blitz-host` (`crates/blitz-host-protocol`, `crates/blitz-host-transport`, `crates/blitz-host-bridge`, `crates/blitz-host`)
+     - `util/oxidase` (`crates/oxidase`, `crates/oxidase-macro`, `crates/oxidase-native-runner`, examples)
+     - `blitz` monorepo packages (`dioxus-native`, `blitz-shell`, `blitz-dom`, etc.)
+   - Toolchain: Rust 1.98.1 / Cargo, MSVC C/C++ build tools.
 
-2. **Previous Inspect Output Limitation**:
-   - `blitz-host inspect` previously dumped the entire serialized DOM tree JSON directly to `stdout`.
-   - On realistic native applications (100~500+ nodes), output flooded terminals with 700~3,000+ lines of JSON, polluting CI logs and exhausting LLM context windows during automated agent workflows.
+2. **Stack Dependencies & Build Status**:
+   - `stylo v0.21.0` (Servo CSS engine used by Blitz) successfully runs its `build.rs` code-generation with Python 3.12.10 and compiles on Windows.
+   - Upstream Blitz crates (`blitz-traits`, `blitz-dom`, `taffy`, `parley`, `anyrender`) compile cleanly on Windows.
+   - `blitz-host-protocol` compiles cleanly on Windows.
 
-3. **Previous Click Resolution Mismatch**:
-   - `ActionRequest::Click` previously treated any `click_fn` returning `false` (meaning unhandled by Dioxus VirtualDOM component listeners) as a fatal error (`Err("Node #{node_id} or active listener not found in document")`).
-   - In standard W3C DOM and UI automation frameworks (Playwright, Puppeteer), clicking valid DOM elements without explicit click handlers (such as `body` or static backdrop containers) is a valid, essential operation used for outside-click dismiss, focus clearing (blur), or neutral background testing.
-   - Conflating "no listener handled the event" with "target is invalid" caused valid selectors like `"body"` to fail with exit code 1 even though the node was accurately resolved in the DOM.
-
-4. **Scope Boundary**:
-   - Runtime scripting (Rhai, `eval`, `run`, REPL) remains deferred to the cross-host `oxidase` layer.
-   - Same-process multi-window routing and speculative extensions remain deferred.
-
----
-
-## 2. What I Changed
-
-1. **Protocol Schema & Machine-Readable Interception Field (`crates/blitz-host-protocol/src/lib.rs`)**:
-   - Added an optional, backward-compatible `handled` boolean field to `ActionResponse`:
-     ```rust
-     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-     #[serde(rename_all = "camelCase")]
-     pub struct ActionResponse {
-         pub success: bool,
-         pub node_id: u64,
-         #[serde(default, skip_serializing_if = "Option::is_none")]
-         pub handled: Option<bool>,
-         #[serde(default, skip_serializing_if = "Option::is_none")]
-         pub message: Option<String>,
-     }
-     ```
-   - Exposes a first-class, machine-readable boolean (`handled: Some(true)` vs `handled: Some(false)`) allowing AI agents and CI assertions to programmatically evaluate listener interception without brittle message string parsing.
-   - Maintained full deserialization backward-compatibility via `#[serde(default, skip_serializing_if = "Option::is_none")]`.
-
-2. **Decoupled DOM Node Existence from Listener Interception (`crates/blitz-host/src/host.rs`)**:
-   - Updated `handle_action` (`ActionRequest::Click`) and `handle_action_click`:
-     - **Step 1 (DOM Existence Check)**: Verifies `base_doc.get_node(NodeId::from_u64(node_id))` exists. If absent, fails fast with `Err(format!("Node #{node_id} not found in document"))`.
-     - **Step 2 (Listener Execution)**: Calls `let handled = click_fn(base_doc, node_id);`.
-     - **Step 3 (Success Dispatch Return)**: Returns `Ok(ActionResponse)` regardless of whether a Dioxus listener was intercepted, with `handled: Some(handled)` and clear diagnostic messages:
-       - Handled: `"Dispatched synthetic click to node #{node_id} (handled by listener)"`
-       - Unhandled: `"Dispatched synthetic click to node #{node_id} (unhandled, background click)"`
-   - Updated `Focus` to set `handled: Some(true)` on successful focus dispatch.
-   - Updated `crates/blitz-host-bridge/src/lib.rs` test mock to conform to the updated struct signature.
-
-3. **Optional Output Spill in `inspect` CLI (`crates/blitz-host/src/bin/blitz-host.rs`)**:
-   - Added `-o, --output <PATH>` argument parsing to `blitz-host inspect`.
-   - **When `-o <PATH>` is supplied**:
-     - Serializes pretty JSON and writes it to `<PATH>` (auto-creating parent directories as needed).
-     - Prints compact metadata JSON to `stdout`:
-       ```json
-       {
-         "success": true,
-         "filePath": "/path/to/dom.json",
-         "rootId": 4294967300,
-         "nodeCount": 102,
-         "bytes": 20359,
-         "message": "Saved DOM inspection snapshot (102 nodes) to /path/to/dom.json"
-       }
-       ```
-   - **When `-o` is omitted**:
-     - Prints the full `InspectResponse` JSON to `stdout` as before, preserving 100% backward compatibility with shell pipelines and `jq`.
-   - **CLI Flag Disambiguation Fix**:
-     - Updated `determine_selector` to skip flag value arguments (such as `-o dom.json` or `--selector sel`), preventing output file paths ending in `.json` from being misinterpreted as explicit host descriptor files.
-   - Updated `print_inspect_help()` and `README.md` with `-o` documentation and examples.
+3. **Transport Protocol Architecture**:
+   - `blitz-host-transport` was developed and verified on macOS/Unix around local Unix Domain Sockets (UDS) with POSIX filesystem permissions (`0o600`), Unix process signal checks (`libc::kill(pid, 0)`), and `std::os::unix::net::{UnixListener, UnixStream}`.
 
 ---
 
-## 3. Validation Actually Run
+## 2. What I Validated
 
-1. **Protocol Unit Tests & Serde Backward-Compatibility**:
-   ```bash
-   cargo test -p blitz-host-protocol --lib
-   ```
-   - **Result**: Passed (2 passed; 0 failed). Verified roundtrip serialization with `handled: true` and deserialization of legacy envelopes omitting `handled`.
+Following the required staged order in [instruction.md](file:///d:/business/dioxus/util/blitz-host/instruction.md):
 
-2. **Integration Test Suite**:
-   ```bash
-   cargo test --test live_inspect
-   ```
-   - **Result**: Passed (14 live E2E assertion stages passed in 10.64s).
+1. **Stage 1 — Windows compile / build parity**:
+   - Installed Python 3.12.10 via `winget` to resolve `stylo` build script requirement.
+   - Verified `stylo v0.21.0` code generation and build script pass on Windows.
+   - Evaluated `cargo check --workspace` inside `util/blitz-host`.
+   - Identified the sole remaining compile blocker: `blitz-host-transport`.
 
-3. **Live Native Verification against Interactive Runner (`oxidase-native-runner`, PID 92024)**:
+2. **Stage 2 — Transport viability on Windows**:
+   - Audited [crates/blitz-host-transport/src/client.rs](file:///d:/business/dioxus/util/blitz-host/crates/blitz-host-transport/src/client.rs), [crates/blitz-host-transport/src/server.rs](file:///d:/business/dioxus/util/blitz-host/crates/blitz-host-transport/src/server.rs), and [crates/blitz-host-transport/src/discovery.rs](file:///d:/business/dioxus/util/blitz-host/crates/blitz-host-transport/src/discovery.rs) for OS-specific assumptions, imports, and API boundaries.
 
-   - **A. `inspect -o <PATH>` (Full Document File Spill)**:
-     ```bash
-     target/debug/blitz-host inspect -o target/full_dom.json
-     ```
-     - **Stdout**:
-       ```json
-       {
-         "bytes": 20994,
-         "filePath": "/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/target/full_dom.json",
-         "message": "Saved DOM inspection snapshot (105 nodes) to /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/target/full_dom.json",
-         "nodeCount": 105,
-         "rootId": 4294967297,
-         "success": true
-       }
-       ```
-     - **File Verified**: `target/full_dom.json` exists on disk with 21KB of formatted DOM JSON.
+3. **Stage 3 through Stage 5 (Live Attach, Sentinel `Ctrl+A`, Pointer/Capture)**:
+   - Evaluated whether progress beyond Stage 1/2 is possible. As mandated by `instruction.md`, because `blitz-host-transport` fails compilation and its transport logic is Unix-only, subsequent stages cannot execute until transport is adapted for Windows.
 
-   - **B. `inspect [TARGET] -o <PATH>` (Subtree File Spill)**:
-     ```bash
-     target/debug/blitz-host inspect "body" -o target/body_dom.json
-     ```
-     - **Stdout**:
-       ```json
-       {
-         "bytes": 20359,
-         "filePath": "/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/target/body_dom.json",
-         "message": "Saved DOM inspection snapshot (102 nodes) to /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/target/body_dom.json",
-         "nodeCount": 102,
-         "rootId": 4294967300,
-         "success": true
-       }
-       ```
-     - **File Verified**: `target/body_dom.json` exists on disk with 20KB of formatted subtree JSON.
+---
 
-   - **C. Standard `inspect` (Without `-o`)**:
-     ```bash
-     target/debug/blitz-host inspect "#test-input"
-     ```
-     - **Stdout**: Full `InspectResponse` JSON printed directly to `stdout` with `rootId: 4294967449`.
+## 3. Evidence / Validation Actually Run
 
-   - **D. Valid DOM Element Without Listener (`body` - Unhandled Background Click)**:
-     ```bash
-     target/debug/blitz-host mouse click "body"
-     ```
-     - **Exit Code**: `0`
-     - **Stdout**:
-       ```json
-       {
-         "success": true,
-         "nodeId": 4294967300,
-         "handled": false,
-         "message": "Dispatched synthetic click to node #4294967300 (unhandled, background click)"
-       }
-       ```
+### 1. `stylo v0.21.0` Build Script Resolution
+- Installed Python 3.12.10 (`winget install --id Python.Python.3.12 --silent`).
+- Configured persistent `PYTHON3` and `PATH` environment variables.
+- Result: **RESOLVED**. `stylo v0.21.0` and its build scripts run and compile cleanly on Windows.
 
-   - **E. Valid DOM Element With Active Listener (`input` - Handled Click)**:
-     ```bash
-     target/debug/blitz-host mouse click "input"
-     ```
-     - **Exit Code**: `0`
-     - **Stdout**:
-       ```json
-       {
-         "success": true,
-         "nodeId": 4294967449,
-         "handled": true,
-         "message": "Dispatched synthetic click to node #4294967449 (handled by listener)"
-       }
-       ```
+### 2. `blitz-host-protocol` Compiles Cleanly
+- Command: `cargo check -p blitz-host-protocol`
+- Result: **SUCCESS**. Zero Unix-specific dependencies.
 
-   - **F. Missing Selector / Non-Existent Target (Fail Fast)**:
-     ```bash
-     target/debug/blitz-host mouse click "#does-not-exist"
-     ```
-     - **Exit Code**: `1`
-     - **Stderr**: `Error: Custom { kind: Other, error: "Element matching selector '#does-not-exist' not found in document" }`
+### 3. `blitz-host-transport` Fails to Compile (The Core Code Blocker)
+- Command: `cargo check --workspace`
+- Result: **FAILED (Exit code: 1)**
+- Evidence:
+  ```text
+  error[E0433]: cannot find `unix` in `os`
+   --> crates\blitz-host-transport\src\client.rs:2:14
+    |
+  2 | use std::os::unix::net::UnixStream;
+    |              ^^^^ could not find `unix` in `os`
 
-   - **G. Missing Numeric Node ID (Fail Fast)**:
-     ```bash
-     target/debug/blitz-host mouse click 99999999
-     ```
-     - **Exit Code**: `1`
-     - **Stderr**: `Error: Custom { kind: Other, error: "Node #99999999 not found in document" }`
+  error[E0433]: cannot find `unix` in `os`
+   --> crates\blitz-host-transport\src\server.rs:3:14
+    |
+  3 | use std::os::unix::fs::PermissionsExt;
+    |              ^^^^ could not find `unix` in `os`
 
-4. **Documentation Structure Verification**:
-   ```bash
-   bash ~/.gemini/config/skills/verify-markdown/bin/verify-markdown.sh result.md --require-frontmatter false
-   bash ~/.gemini/config/skills/verify-markdown/bin/verify-markdown.sh handoff.md --require-frontmatter false
-   ```
-   - **Result**: Passed (`[verify-markdown] OK: File structure is valid.`).
+  error[E0433]: cannot find `unix` in `os`
+   --> crates\blitz-host-transport\src\server.rs:4:14
+    |
+  4 | use std::os::unix::net::{UnixListener, UnixStream};
+    |              ^^^^ could not find `unix` in `os`
+
+  error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+    --> crates\blitz-host-transport\src\server.rs:57:60
+     |
+  57 |         fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
+     |                                                            ^^^^^^^^^ associated function or constant not found in `Permissions`
+  ```
+
+### 4. Transport Discovery Logic Blockers
+- In `crates/blitz-host-transport/src/discovery.rs` (lines 206–216):
+  ```rust
+  pub fn is_reachable(descriptor: &HostDescriptor) -> bool {
+      #[cfg(unix)]
+      {
+          std::os::unix::net::UnixStream::connect(&descriptor.socket_path).is_ok()
+      }
+      #[cfg(not(unix))]
+      {
+          false
+      }
+  }
+  ```
+  `is_reachable()` unconditionally returns `false` on non-Unix platforms, meaning `list_hosts()`, `discover()`, and `discover_target()` immediately reject any Windows host instance as dead or unreachable.
+- In `crates/blitz-host-transport/src/discovery.rs` (lines 218–229):
+  ```rust
+  fn is_pid_alive(pid: u32) -> bool {
+      #[cfg(unix)]
+      {
+          unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+      }
+      #[cfg(not(unix))]
+      {
+          true
+      }
+  }
+  ```
+  Relies on `libc::kill` which is unavailable on Windows.
 
 ---
 
 ## 4. Final Verdict
 
-**Implemented and clarified**.
+**Windows lane blocked with evidence**
 
-1. `inspect -o <PATH>` works reliably as an optional file spill mechanism, saving large DOM snapshots to disk while emitting clean, structured metadata on `stdout`.
-2. Standard `inspect` preserves 100% backward compatibility by emitting full JSON to `stdout` when `-o` is omitted.
-3. DOM click resolution correctly decouples node existence from listener interception:
-   - Non-existent targets fail fast with exit code 1.
-   - Valid targets without active Dioxus listeners (`body`, static backdrops) succeed with exit code 0 and `handled: false`.
-   - Valid targets with active Dioxus listeners succeed with exit code 0 and `handled: true`.
-4. The handled/unhandled distinction is exposed as a first-class structured field (`handled: Option<bool>`) directly in `ActionResponse` JSON for robust programmatic machine consumption.
-5. All live native validations passed with zero regressions.
+### Summary of Blockers
+1. **Compilation Parity**:
+   - `stylo` build script: RESOLVED (Python 3.12 installed).
+   - `blitz-host-protocol`: ACHIEVED.
+   - `blitz-host-transport`: **BLOCKED** due to unconditional `std::os::unix` and POSIX `from_mode(0o600)` references.
+   - `blitz-host` CLI binary: **BLOCKED** because it depends directly on `blitz-host-transport`.
+2. **Transport Viability**:
+   - **BLOCKED**. Relies on standard library Unix Domain Sockets (`std::os::unix::net`), POSIX permissions, and Unix signals. `is_reachable()` is hardcoded to return `false` on Windows.
+3. **Live Attach / Inspect / Keyboard Sentinel (`Ctrl+A`) / Pointer Smoke**:
+   - **BLOCKED** until `blitz-host-transport` is adapted for Windows.
+
+### Next Windows-Specific Action Required
+- **Cross-Platform Transport Adaptation for `blitz-host-transport`**:
+  1. Abstraction layer for local IPC: Either use Windows Named Pipes (e.g. `interprocess`) or Windows 10+ AF_UNIX sockets via `uds_windows` or `tokio`.
+  2. Guard POSIX permissions with `#[cfg(unix)]` and omit `PermissionsExt::from_mode` on Windows.
+  3. Implement Windows process liveness check (`OpenProcess` via `windows-sys` / Win32 API) instead of Unix `libc::kill(pid, 0)`.
+  4. Implement Windows connection probe in `is_reachable()`.

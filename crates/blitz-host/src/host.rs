@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use blitz_dom::BaseDocument;
-use blitz_host_bridge::{resolve_target_in_doc, HostBridge};
+use blitz_host_bridge::{HostBridge, resolve_target_in_doc};
 use blitz_host_protocol::{ActionRequest, ActionResponse, HostDescriptor};
 use blitz_host_transport::DebugServer;
 
@@ -98,7 +98,6 @@ impl HostControl {
         Self::init_global(app_name, app_version)
     }
 
-
     /// Checks if the process-global HostControl singleton is currently active.
     pub fn is_global_active() -> bool {
         GLOBAL_HOST_CONTROL
@@ -135,7 +134,8 @@ impl HostControl {
             let win_id = self.server.descriptor().primary_window_id;
             let _ = self.server.update_primary_window(win_id, Some(doc.id()));
         }
-        self.bridge.poll_and_service_with(doc, current_frame, dispatch_action)
+        self.bridge
+            .poll_and_service_with(doc, current_frame, dispatch_action)
     }
 
     /// Services the process-global HostControl instance on the UI thread for the current frame.
@@ -174,11 +174,40 @@ impl HostControl {
         C: FnMut(&mut BaseDocument, u64) -> bool,
         F: FnMut(&mut BaseDocument, u64) -> bool,
         S: FnMut(&mut BaseDocument, u64, &str) -> bool,
-        K: FnMut(&mut BaseDocument, Option<u64>, &str, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
-        M: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
-        MD: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<&str>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
-        MU: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, Option<&str>, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
-        W: FnMut(&mut BaseDocument, Option<u64>, Option<(f32, f32)>, f64, f64, Option<blitz_host_protocol::KeyModifiers>) -> Result<u64, String>,
+        K: FnMut(
+            &mut BaseDocument,
+            Option<u64>,
+            &str,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        M: FnMut(
+            &mut BaseDocument,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        MD: FnMut(
+            &mut BaseDocument,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<&str>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        MU: FnMut(
+            &mut BaseDocument,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<&str>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        W: FnMut(
+            &mut BaseDocument,
+            Option<u64>,
+            Option<(f32, f32)>,
+            f64,
+            f64,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
     {
         let resolved_target = resolve_target_in_doc(
             base_doc,
@@ -200,9 +229,13 @@ impl HostControl {
                     node_id,
                     handled: Some(handled),
                     message: Some(if handled {
-                        format!("Dispatched synthetic click to node #{node_id} (handled by listener)")
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (handled by listener)"
+                        )
                     } else {
-                        format!("Dispatched synthetic click to node #{node_id} (unhandled, background click)")
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (unhandled, background click)"
+                        )
                     }),
                 })
             }
@@ -234,7 +267,9 @@ impl HostControl {
                         message: Some(format!("Set value on node #{node_id}")),
                     })
                 } else {
-                    Err(format!("Node #{node_id} not found or not an editable target"))
+                    Err(format!(
+                        "Node #{node_id} not found or not an editable target"
+                    ))
                 }
             }
             ActionRequest::Key { key, modifiers, .. } => {
@@ -243,12 +278,16 @@ impl HostControl {
                         success: true,
                         node_id: target_nid,
                         handled: None,
-                        message: Some(format!("Dispatched synthetic key '{key}' to node #{target_nid}")),
+                        message: Some(format!(
+                            "Dispatched synthetic key '{key}' to node #{target_nid}"
+                        )),
                     }),
                     Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
                 }
             }
-            ActionRequest::MouseMove { x, y, modifiers, .. } => {
+            ActionRequest::MouseMove {
+                x, y, modifiers, ..
+            } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
@@ -258,52 +297,98 @@ impl HostControl {
                         success: true,
                         node_id: target_nid,
                         handled: None,
-                        message: Some(format!("Dispatched synthetic mouse move to node #{target_nid}")),
+                        message: Some(format!(
+                            "Dispatched synthetic mouse move to node #{target_nid}"
+                        )),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse move: {e}")),
                 }
             }
-            ActionRequest::MouseDown { x, y, button, modifiers, .. } => {
+            ActionRequest::MouseDown {
+                x,
+                y,
+                button,
+                modifiers,
+                ..
+            } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match mouse_down_fn(base_doc, resolved_target, coords, button.as_deref(), *modifiers) {
+                match mouse_down_fn(
+                    base_doc,
+                    resolved_target,
+                    coords,
+                    button.as_deref(),
+                    *modifiers,
+                ) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
                         handled: None,
-                        message: Some(format!("Dispatched synthetic mouse down to node #{target_nid}")),
+                        message: Some(format!(
+                            "Dispatched synthetic mouse down to node #{target_nid}"
+                        )),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse down: {e}")),
                 }
             }
-            ActionRequest::MouseUp { x, y, button, modifiers, .. } => {
+            ActionRequest::MouseUp {
+                x,
+                y,
+                button,
+                modifiers,
+                ..
+            } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match mouse_up_fn(base_doc, resolved_target, coords, button.as_deref(), *modifiers) {
+                match mouse_up_fn(
+                    base_doc,
+                    resolved_target,
+                    coords,
+                    button.as_deref(),
+                    *modifiers,
+                ) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
                         handled: None,
-                        message: Some(format!("Dispatched synthetic mouse up to node #{target_nid}")),
+                        message: Some(format!(
+                            "Dispatched synthetic mouse up to node #{target_nid}"
+                        )),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse up: {e}")),
                 }
             }
-            ActionRequest::Wheel { x, y, delta_x, delta_y, modifiers, .. } => {
+            ActionRequest::Wheel {
+                x,
+                y,
+                delta_x,
+                delta_y,
+                modifiers,
+                ..
+            } => {
                 let coords = match (*x, *y) {
                     (Some(cx), Some(cy)) => Some((cx, cy)),
                     _ => None,
                 };
-                match wheel_fn(base_doc, resolved_target, coords, *delta_x, *delta_y, *modifiers) {
+                match wheel_fn(
+                    base_doc,
+                    resolved_target,
+                    coords,
+                    *delta_x,
+                    *delta_y,
+                    *modifiers,
+                ) {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
                         handled: None,
-                        message: Some(format!("Dispatched synthetic wheel ({delta_x}, {delta_y}) to node #{target_nid}")),
+                        message: Some(format!(
+                            "Dispatched synthetic wheel ({delta_x}, {delta_y}) to node #{target_nid}"
+                        )),
                     }),
                     Err(e) => Err(format!("Failed to dispatch wheel: {e}")),
                 }
@@ -341,13 +426,19 @@ impl HostControl {
                     node_id,
                     handled: Some(handled),
                     message: Some(if handled {
-                        format!("Dispatched synthetic click to node #{node_id} (handled by listener)")
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (handled by listener)"
+                        )
                     } else {
-                        format!("Dispatched synthetic click to node #{node_id} (unhandled, background click)")
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (unhandled, background click)"
+                        )
                     }),
                 })
             }
-            other => Err(format!("Action {other:?} not supported by handle_action_click")),
+            other => Err(format!(
+                "Action {other:?} not supported by handle_action_click"
+            )),
         }
     }
 
@@ -380,4 +471,3 @@ pub fn init_if_debug(app_name: &str, app_version: &str) -> bool {
 pub fn init_if_debug_default() -> bool {
     init_default()
 }
-

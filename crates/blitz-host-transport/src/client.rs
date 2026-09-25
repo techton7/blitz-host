@@ -1,5 +1,4 @@
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -8,20 +7,26 @@ use blitz_host_protocol::{
     ControlResponse, ElementTarget, HostDescriptor, InspectRequest, InspectResponse, KeyModifiers,
     SettleRequest, SettleResponse,
 };
+use interprocess::TryClone;
+use interprocess::local_socket::Stream;
+use interprocess::local_socket::traits::Stream as _;
+
+use crate::discovery::socket_name_from_str;
 
 /// Client used by agents or test runners to interact with a live running Blitz host.
 pub struct DebugClient {
-    stream: UnixStream,
-    reader: BufReader<UnixStream>,
+    stream: Stream,
+    reader: BufReader<Stream>,
     descriptor: HostDescriptor,
 }
 
 impl DebugClient {
     /// Connect to a running Blitz host identified by its discovery descriptor.
     pub fn connect(descriptor: HostDescriptor) -> io::Result<Self> {
-        let stream = UnixStream::connect(&descriptor.socket_path)?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        let name = socket_name_from_str(&descriptor.socket_path)?;
+        let stream = Stream::connect(name)?;
+        let _ = stream.set_recv_timeout(Some(Duration::from_secs(5)));
+        let _ = stream.set_send_timeout(Some(Duration::from_secs(5)));
         let reader = BufReader::new(stream.try_clone()?);
 
         Ok(Self {
@@ -100,7 +105,10 @@ impl DebugClient {
     }
 
     /// Inspect a specific target node or selector and its subtree.
-    pub fn inspect_target(&mut self, target: impl Into<ElementTarget>) -> io::Result<InspectResponse> {
+    pub fn inspect_target(
+        &mut self,
+        target: impl Into<ElementTarget>,
+    ) -> io::Result<InspectResponse> {
         let target = target.into();
         let (root_node_id, selector) = match &target {
             ElementTarget::Id(id) => (Some(*id), None),
@@ -132,7 +140,11 @@ impl DebugClient {
     }
 
     /// Click on a specific node by ID on a targeted window (or primary fallback if None).
-    pub fn click_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
+    pub fn click_window(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: u64,
+    ) -> io::Result<ActionResponse> {
         self.act(ActionRequest::Click {
             window_id,
             node_id: Some(node_id),
@@ -171,7 +183,11 @@ impl DebugClient {
     }
 
     /// Focus a specific node by ID on a targeted window (or primary fallback if None).
-    pub fn focus_window(&mut self, window_id: Option<u64>, node_id: u64) -> io::Result<ActionResponse> {
+    pub fn focus_window(
+        &mut self,
+        window_id: Option<u64>,
+        node_id: u64,
+    ) -> io::Result<ActionResponse> {
         self.act(ActionRequest::Focus {
             window_id,
             node_id: Some(node_id),
@@ -205,7 +221,11 @@ impl DebugClient {
     }
 
     /// Convenience helper to set the value of an input node by ID on the default/fallback window.
-    pub fn set_value(&mut self, node_id: u64, value: impl Into<String>) -> io::Result<ActionResponse> {
+    pub fn set_value(
+        &mut self,
+        node_id: u64,
+        value: impl Into<String>,
+    ) -> io::Result<ActionResponse> {
         self.set_value_window(None, node_id, value)
     }
 
@@ -432,7 +452,13 @@ impl DebugClient {
         button: Option<&str>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        self.mouse_down_target(window_id, node_id.map(ElementTarget::Id), coords, button, modifiers)
+        self.mouse_down_target(
+            window_id,
+            node_id.map(ElementTarget::Id),
+            coords,
+            button,
+            modifiers,
+        )
     }
 
     /// Release mouse button on a target element or coordinates.
@@ -474,7 +500,13 @@ impl DebugClient {
         button: Option<&str>,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        self.mouse_up_target(window_id, node_id.map(ElementTarget::Id), coords, button, modifiers)
+        self.mouse_up_target(
+            window_id,
+            node_id.map(ElementTarget::Id),
+            coords,
+            button,
+            modifiers,
+        )
     }
 
     /// Execute a drag sequence between two elements specified by ID or CSS selector.
@@ -493,7 +525,10 @@ impl DebugClient {
 
     /// Execute a drag sequence from `from_node_id` to `to_node_id` by composing move -> down -> move -> up.
     pub fn drag(&mut self, from_node_id: u64, to_node_id: u64) -> io::Result<ActionResponse> {
-        self.drag_target(ElementTarget::Id(from_node_id), ElementTarget::Id(to_node_id))
+        self.drag_target(
+            ElementTarget::Id(from_node_id),
+            ElementTarget::Id(to_node_id),
+        )
     }
 
     /// Dispatch mouse wheel / scroll event on a target element or coordinates.
@@ -538,7 +573,14 @@ impl DebugClient {
         delta_y: f64,
         modifiers: Option<KeyModifiers>,
     ) -> io::Result<ActionResponse> {
-        self.wheel_target(window_id, node_id.map(ElementTarget::Id), coords, delta_x, delta_y, modifiers)
+        self.wheel_target(
+            window_id,
+            node_id.map(ElementTarget::Id),
+            coords,
+            delta_x,
+            delta_y,
+            modifiers,
+        )
     }
 
     /// Scroll a target node by vertical delta on the primary window.
@@ -552,7 +594,11 @@ impl DebugClient {
     }
 
     /// Synchronize execution by waiting for `frames` VSync / render ticks on a targeted window.
-    pub fn settle_window(&mut self, window_id: Option<u64>, frames: u32) -> io::Result<SettleResponse> {
+    pub fn settle_window(
+        &mut self,
+        window_id: Option<u64>,
+        frames: u32,
+    ) -> io::Result<SettleResponse> {
         match self.send_request(ControlRequest::Settle(SettleRequest { window_id, frames }))? {
             ControlResponse::SettleSuccess(settle_resp) => Ok(settle_resp),
             ControlResponse::Error(err) => Err(io::Error::other(err)),
@@ -681,7 +727,8 @@ impl DebugClient {
         let resp = self.capture(&path)?;
         if !resp.success {
             return Err(io::Error::other(
-                resp.message.unwrap_or_else(|| "Capture failed without message".into()),
+                resp.message
+                    .unwrap_or_else(|| "Capture failed without message".into()),
             ));
         }
         Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
@@ -697,10 +744,9 @@ impl DebugClient {
     ) -> io::Result<(u32, u32, PathBuf)> {
         let resp = self.capture_node(node_id, &path)?;
         if !resp.success {
-            return Err(io::Error::other(
-                resp.message
-                    .unwrap_or_else(|| format!("Capture of node #{node_id} failed without message")),
-            ));
+            return Err(io::Error::other(resp.message.unwrap_or_else(|| {
+                format!("Capture of node #{node_id} failed without message")
+            })));
         }
         Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
     }
@@ -715,10 +761,9 @@ impl DebugClient {
     ) -> io::Result<(u32, u32, PathBuf)> {
         let resp = self.capture_target(target, &path)?;
         if !resp.success {
-            return Err(io::Error::other(
-                resp.message
-                    .unwrap_or_else(|| "Capture of target failed without message".into()),
-            ));
+            return Err(io::Error::other(resp.message.unwrap_or_else(|| {
+                "Capture of target failed without message".into()
+            })));
         }
         Ok((resp.width, resp.height, PathBuf::from(resp.file_path)))
     }

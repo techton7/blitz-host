@@ -9,8 +9,8 @@ pub mod waker;
 
 pub use client::DebugClient;
 pub use discovery::{
-    descriptor_dir, discover, discover_target, is_reachable, list_hosts, read_descriptor,
-    write_descriptor, TargetSelector,
+    TargetSelector, descriptor_dir, discover, discover_target, is_reachable, list_hosts,
+    read_descriptor, write_descriptor,
 };
 pub use server::{ControlBridgeRequest, DebugServer};
 pub use waker::ServiceWaker;
@@ -18,7 +18,9 @@ pub use waker::ServiceWaker;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blitz_host_protocol::{ControlRequest, ControlResponse, InspectRequest, InspectResponse, SemanticNode};
+    use blitz_host_protocol::{
+        ControlRequest, ControlResponse, InspectRequest, InspectResponse, SemanticNode,
+    };
     use std::thread;
 
     #[test]

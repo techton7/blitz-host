@@ -19,7 +19,11 @@ pub fn write_descriptor(descriptor: &HostDescriptor) -> io::Result<PathBuf> {
     fs::create_dir_all(&dir)?;
 
     let target_path = dir.join(format!("{}.json", descriptor.instance_id));
-    let temp_path = dir.join(format!("{}.tmp.{}", descriptor.instance_id, std::process::id()));
+    let temp_path = dir.join(format!(
+        "{}.tmp.{}",
+        descriptor.instance_id,
+        std::process::id()
+    ));
 
     let bytes = serde_json::to_vec_pretty(descriptor).map_err(io::Error::other)?;
 
@@ -94,6 +98,7 @@ pub fn list_hosts() -> io::Result<Vec<HostDescriptor>> {
         } else if !is_pid_alive(desc.pid) {
             // Reap stale descriptor and socket for dead PID
             let _ = fs::remove_file(&path);
+            #[cfg(unix)]
             let _ = fs::remove_file(Path::new(&desc.socket_path));
         }
     }
@@ -119,7 +124,10 @@ pub fn resolve_target_from_hosts(
     match selector {
         TargetSelector::ExplicitPath(path) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Cannot resolve explicit path '{}' from host list", path.display()),
+            format!(
+                "Cannot resolve explicit path '{}' from host list",
+                path.display()
+            ),
         )),
         TargetSelector::Pid(target_pid) => hosts
             .into_iter()
@@ -154,23 +162,58 @@ pub fn resolve_target_from_hosts(
 pub fn discover_target(selector: &TargetSelector) -> io::Result<HostDescriptor> {
     match selector {
         TargetSelector::ExplicitPath(path) => {
-            if !path.exists() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("Explicit descriptor or socket '{}' does not exist", path.display()),
-                ));
-            }
-            if path.extension().is_some_and(|ext| ext == "sock") {
-                return Ok(HostDescriptor {
+            let path_str = path.to_string_lossy();
+            if path_str.starts_with(r"\\.\pipe\") {
+                let desc = HostDescriptor {
                     protocol_version: blitz_host_protocol::PROTOCOL_VERSION,
                     pid: 0,
-                    instance_id: "explicit-socket".to_string(),
-                    socket_path: path.to_string_lossy().to_string(),
+                    instance_id: "explicit-pipe".to_string(),
+                    socket_path: path_str.to_string(),
                     renderer: "blitz".to_string(),
                     renderer_version: "unknown".to_string(),
                     primary_window_id: None,
                     primary_document_id: None,
-                });
+                };
+                if is_reachable(&desc) {
+                    return Ok(desc);
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionRefused,
+                        format!(
+                            "Explicit Named Pipe at '{}' is unreachable",
+                            desc.socket_path
+                        ),
+                    ));
+                }
+            }
+            if !path.exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "Explicit descriptor or socket '{}' does not exist",
+                        path.display()
+                    ),
+                ));
+            }
+            if path.extension().is_some_and(|ext| ext == "sock") {
+                let desc = HostDescriptor {
+                    protocol_version: blitz_host_protocol::PROTOCOL_VERSION,
+                    pid: 0,
+                    instance_id: "explicit-socket".to_string(),
+                    socket_path: path_str.to_string(),
+                    renderer: "blitz".to_string(),
+                    renderer_version: "unknown".to_string(),
+                    primary_window_id: None,
+                    primary_document_id: None,
+                };
+                if is_reachable(&desc) {
+                    return Ok(desc);
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionRefused,
+                        format!("Control socket at '{}' is unreachable", desc.socket_path),
+                    ));
+                }
             }
             let desc = read_descriptor(path)?;
             if is_reachable(&desc) {
@@ -203,16 +246,28 @@ pub fn read_descriptor(path: &Path) -> io::Result<HostDescriptor> {
     serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+/// Resolve a platform-appropriate local socket name from a socket_path string.
+pub fn socket_name_from_str(s: &str) -> io::Result<interprocess::local_socket::Name<'_>> {
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::{GenericNamespaced, ToNsName};
+        let clean = s.strip_prefix(r"\\.\pipe\").unwrap_or(s);
+        clean.to_ns_name::<GenericNamespaced>()
+    }
+    #[cfg(not(windows))]
+    {
+        use interprocess::local_socket::{GenericFilePath, ToFsName};
+        Path::new(s).to_fs_name::<GenericFilePath>()
+    }
+}
+
 /// Test whether the socket named in the descriptor accepts connections.
 pub fn is_reachable(descriptor: &HostDescriptor) -> bool {
-    #[cfg(unix)]
-    {
-        std::os::unix::net::UnixStream::connect(&descriptor.socket_path).is_ok()
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
+    use interprocess::local_socket::traits::Stream as _;
+    let Ok(name) = socket_name_from_str(&descriptor.socket_path) else {
+        return false;
+    };
+    interprocess::local_socket::Stream::connect(name).is_ok()
 }
 
 /// Check if a process ID is currently running.
@@ -222,7 +277,25 @@ fn is_pid_alive(pid: u32) -> bool {
         // kill(pid, 0) checks if process exists without sending a signal
         unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut exit_code: u32 = 0;
+            let success = GetExitCodeProcess(handle, &mut exit_code);
+            CloseHandle(handle);
+            success != 0 && exit_code == STILL_ACTIVE as u32
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         true
     }

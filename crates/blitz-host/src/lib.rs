@@ -18,28 +18,27 @@ pub mod host;
 #[cfg(feature = "dioxus-native")]
 pub mod dioxus;
 
-pub use host::{init_default, init_global, init_if_debug, init_if_debug_default, HostControl};
 #[cfg(feature = "dioxus-native")]
 pub use dioxus::BlitzHost;
+pub use host::{HostControl, init_default, init_global, init_if_debug, init_if_debug_default};
 
 pub use blitz_host_protocol::{
     ActionRequest, ActionResponse, CaptureMetadataResponse, CaptureRequest, CaptureResponse,
-    ControlRequest, ControlResponse, HostDescriptor, InspectRequest, InspectResponse, SettleRequest,
-    SettleResponse,
+    ControlRequest, ControlResponse, HostDescriptor, InspectRequest, InspectResponse,
+    SettleRequest, SettleResponse,
 };
 pub use blitz_host_transport::DebugClient;
 
 pub mod prelude {
+    pub use crate::client::DebugClient;
     pub use crate::host::{
-        init_default, init_global, init_if_debug, init_if_debug_default, HostControl,
+        HostControl, init_default, init_global, init_if_debug, init_if_debug_default,
     };
     pub use crate::protocol::{
         ActionRequest, ActionResponse, InspectRequest, InspectResponse, SettleRequest,
         SettleResponse,
     };
-    pub use crate::client::DebugClient;
 
     #[cfg(feature = "dioxus-native")]
     pub use crate::dioxus::BlitzHost;
 }
-

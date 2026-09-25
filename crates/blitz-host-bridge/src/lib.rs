@@ -32,9 +32,9 @@ mod tests {
 
     #[test]
     fn test_bridge_focus_and_set_value_actions() {
-        use std::sync::mpsc::{channel, sync_channel};
         use blitz_host_protocol::{ActionRequest, ControlRequest, ControlResponse};
         use blitz_host_transport::ControlBridgeRequest;
+        use std::sync::mpsc::{channel, sync_channel};
 
         let mut doc = BaseDocument::new(DocumentConfig::default());
         let root_id = doc.root_node().id;
@@ -52,22 +52,21 @@ mod tests {
                 target: None,
             }),
             reply: focus_resp_tx,
-        }).unwrap();
+        })
+        .unwrap();
 
-        let serviced = bridge.poll_and_service_with(&mut doc, 1, |act, d| {
-            match act {
-                ActionRequest::Focus { node_id, .. } => {
-                    let nid = node_id.unwrap();
-                    d.set_focus_to(blitz_dom::NodeId::from_u64(nid));
-                    Ok(blitz_host_protocol::ActionResponse {
-                        success: true,
-                        node_id: nid,
-                        handled: None,
-                        message: Some("focused".into()),
-                    })
-                }
-                _ => Err("unsupported".into()),
+        let serviced = bridge.poll_and_service_with(&mut doc, 1, |act, d| match act {
+            ActionRequest::Focus { node_id, .. } => {
+                let nid = node_id.unwrap();
+                d.set_focus_to(blitz_dom::NodeId::from_u64(nid));
+                Ok(blitz_host_protocol::ActionResponse {
+                    success: true,
+                    node_id: nid,
+                    handled: None,
+                    message: Some("focused".into()),
+                })
             }
+            _ => Err("unsupported".into()),
         });
         assert_eq!(serviced, 1);
         let resp = focus_resp_rx.recv().unwrap();
@@ -81,17 +80,22 @@ mod tests {
 
     #[test]
     fn test_bridge_capture_document() {
-        use std::sync::mpsc::{channel, sync_channel};
         use blitz_host_protocol::{CaptureRequest, ControlRequest, ControlResponse};
         use blitz_host_transport::ControlBridgeRequest;
+        use std::sync::mpsc::{channel, sync_channel};
 
         let mut doc = BaseDocument::new(DocumentConfig::default());
 
         // Test direct helper
-        let (width, height, png_bytes) = capture_document_png(&mut doc).expect("capture_document_png must succeed");
+        let (width, height, png_bytes) =
+            capture_document_png(&mut doc).expect("capture_document_png must succeed");
         assert!(width > 0 && height > 0);
         assert!(png_bytes.len() > 8);
-        assert_eq!(&png_bytes[0..4], &[0x89, b'P', b'N', b'G'], "must start with PNG magic bytes");
+        assert_eq!(
+            &png_bytes[0..4],
+            &[0x89, b'P', b'N', b'G'],
+            "must start with PNG magic bytes"
+        );
 
         // Test IPC bridge routing for full window capture
         let (tx, rx) = channel::<ControlBridgeRequest>();
@@ -110,11 +114,10 @@ mod tests {
                 output_path: test_output_file.to_string(),
             }),
             reply: cap_resp_tx,
-        }).unwrap();
+        })
+        .unwrap();
 
-        let serviced = bridge.poll_and_service_with(&mut doc, 1, |_, _| {
-            Err("no actions".into())
-        });
+        let serviced = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
         assert_eq!(serviced, 1);
 
         let resp = cap_resp_rx.recv().unwrap();
@@ -144,17 +147,19 @@ mod tests {
                 output_path: "target/test_bridge_nonexistent.png".to_string(),
             }),
             reply: node_resp_tx,
-        }).unwrap();
+        })
+        .unwrap();
 
-        let serviced2 = bridge.poll_and_service_with(&mut doc, 1, |_, _| {
-            Err("no actions".into())
-        });
+        let serviced2 = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
         assert_eq!(serviced2, 1);
 
         let resp2 = node_resp_rx.recv().unwrap();
         match resp2 {
             ControlResponse::CaptureSuccess(cap) => {
-                assert!(!cap.success, "capture of non-existent node must report failure");
+                assert!(
+                    !cap.success,
+                    "capture of non-existent node must report failure"
+                );
                 assert!(cap.message.unwrap().contains("not found in document"));
             }
             other => panic!("expected CaptureSuccess with failure status, got {other:?}"),

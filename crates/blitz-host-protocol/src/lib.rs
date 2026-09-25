@@ -349,14 +349,54 @@ impl ActionRequest {
     /// Resolves the intended target if specified either via `target`, `selector`, or `node_id`.
     pub fn target(&self) -> Option<ElementTarget> {
         match self {
-            Self::Click { target, selector, node_id, .. }
-            | Self::Focus { target, selector, node_id, .. }
-            | Self::SetValue { target, selector, node_id, .. }
-            | Self::Key { target, selector, node_id, .. }
-            | Self::MouseMove { target, selector, node_id, .. }
-            | Self::MouseDown { target, selector, node_id, .. }
-            | Self::MouseUp { target, selector, node_id, .. }
-            | Self::Wheel { target, selector, node_id, .. } => {
+            Self::Click {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::Focus {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::SetValue {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::Key {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::MouseMove {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::MouseDown {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::MouseUp {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::Wheel {
+                target,
+                selector,
+                node_id,
+                ..
+            } => {
                 if let Some(t) = target {
                     Some(t.clone())
                 } else if let Some(s) = selector {
@@ -751,7 +791,8 @@ mod tests {
         assert_eq!(act_resp, act_resp_parsed);
 
         // Test backward compatibility without handled field
-        let legacy_json = r#"{"status":"actionSuccess","data":{"success":true,"nodeId":42,"message":"legacy"}}"#;
+        let legacy_json =
+            r#"{"status":"actionSuccess","data":{"success":true,"nodeId":42,"message":"legacy"}}"#;
         let legacy_resp: ControlResponse = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(
             legacy_resp,

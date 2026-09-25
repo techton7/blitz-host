@@ -75,12 +75,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
             NodeData::Element(_) | NodeData::AnonymousBlock(_) | NodeData::Document(_) => {
                 let layout = node.final_layout();
                 let pos = node.absolute_position(0.0, 0.0);
-                Some([
-                    pos.x,
-                    pos.y,
-                    layout.size.width,
-                    layout.size.height,
-                ])
+                Some([pos.x, pos.y, layout.size.width, layout.size.height])
             }
             _ => None,
         };

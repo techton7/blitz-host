@@ -91,18 +91,19 @@ pub fn capture_document_node_png(
     );
 
     // 3. Extract sub-region if cropped, or use full buffer
-    let (final_width, final_height, image_buffer) = if let Some((left, top, crop_w, crop_h)) = crop_rect {
-        let mut cropped = Vec::with_capacity((crop_w * crop_h * 4) as usize);
-        let bottom = top + crop_h;
-        for y in top..bottom {
-            let row_start = ((y * width + left) * 4) as usize;
-            let row_end = row_start + (crop_w * 4) as usize;
-            cropped.extend_from_slice(&full_buffer[row_start..row_end]);
-        }
-        (crop_w, crop_h, cropped)
-    } else {
-        (width, height, full_buffer)
-    };
+    let (final_width, final_height, image_buffer) =
+        if let Some((left, top, crop_w, crop_h)) = crop_rect {
+            let mut cropped = Vec::with_capacity((crop_w * crop_h * 4) as usize);
+            let bottom = top + crop_h;
+            for y in top..bottom {
+                let row_start = ((y * width + left) * 4) as usize;
+                let row_end = row_start + (crop_w * 4) as usize;
+                cropped.extend_from_slice(&full_buffer[row_start..row_end]);
+            }
+            (crop_w, crop_h, cropped)
+        } else {
+            (width, height, full_buffer)
+        };
 
     // 4. Encode RGBA buffer into PNG bytes
     let mut png_bytes = Vec::new();
