@@ -1,23 +1,18 @@
-# Worker Instruction: Add `inspect -o` and Fix DOM-Standard Click Resolution Semantics
+# Worker Instruction: Validate the Current `blitz-host` / `oxidase` Native Lane on Windows
 
-You are working in:
+You are working against the Windows-synced copy of the repository.
 
-```text
-/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
-```
+This is a **Windows validation and gap-discovery pass**, not a general feature implementation pass.
 
-The next `blitz-host` pass now has two tightly-related goals:
-
-1. make `inspect` capable of spilling large JSON snapshots to a file via `-o/--output`
-2. fix click resolution semantics so that valid DOM targets without active Dioxus listeners succeed as unhandled clicks instead of hard errors
+The goal is to determine how much of the current macOS/Unix-proven `blitz-host` + `oxidase` native lane already works on Windows, and where the first real blockers are.
 
 Write all agent-facing reasoning in English.
 
 Use this exact reporting structure:
 
 1. **current repo facts**
-2. **what I changed**
-3. **validation actually run**
+2. **what I validated**
+3. **evidence / validation actually run**
 4. **final verdict**
 
 Do not overclaim.
@@ -26,149 +21,145 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Implement two related improvements:
+Validate the current native control-plane stack on Windows in the most pragmatic order:
 
-### A. `inspect -o <PATH>`
+1. **compile/build parity**
+2. **transport viability**
+3. **minimal live attach proof**
+4. **modifier sentinel (`Ctrl+A`)**
+5. **pointer / capture smoke proof**
 
-Allow large inspect results to be written to disk while returning a compact metadata summary on `stdout`.
-
-### B. DOM-standard click resolution
-
-Separate:
-
-1. **target does not exist** → error
-2. **target exists but no Dioxus listener handled the click** → success, but explicitly marked as unhandled
-
-The goal is to make `blitz-host` more faithful to real DOM/UI interaction semantics and more usable for humans and agents.
+This pass is about establishing what is already true on Windows and what is blocked.
 
 ---
 
-## 2. Required `inspect -o` Behavior
+## 2. Highest-Priority Question
 
-### Default behavior
+The most important question is:
 
-When `-o/--output` is **not** provided:
+> **does the current `blitz-host` transport and host integration even work on Windows, or is the current implementation too Unix-specific?**
 
-1. preserve current inspect behavior
-2. emit the full inspect JSON to `stdout`
+That must be answered before we care about deeper workflow polish.
 
-### `-o/--output` behavior
+You must look for concrete blockers such as:
 
-When `-o/--output <PATH>` is provided:
+1. `std::os::unix::*` usage
+2. Unix Domain Socket assumptions
+3. POSIX permission assumptions (`0o600`, `0o700`)
+4. path, file, or process liveness logic that is Unix-only
 
-1. write the full pretty JSON snapshot to the given file
-2. emit only compact metadata JSON on `stdout`
-
-Reasonable metadata fields include:
-
-1. `success`
-2. `filePath`
-3. `rootId`
-4. `nodeCount`
-5. `bytes`
-6. `message`
-
-This should help with:
-
-1. terminal readability
-2. smaller agent context usage
-3. cleaner CI logs
-
-`inspect -o` should remain optional, not mandatory.
+If the transport itself blocks on Windows, say so plainly and stop pretending later tests are meaningful.
 
 ---
 
-## 3. Required Click Resolution Policy
+## 3. Validation Order You Must Follow
 
-### Distinguish target existence from listener handling
+### Stage 1 — Windows compile / build parity
 
-The current/desired model must clearly separate:
+Start here.
 
-1. **Selector / node does not resolve to a real DOM node**  
-   → error
-2. **Node exists, click dispatched, Dioxus listener handled it**  
-   → success
-3. **Node exists, click dispatched, but no Dioxus listener handled it**  
-   → still success, but clearly marked as unhandled
+At minimum, try to build/check:
 
-### Why this matters
+1. `util/blitz-host`
+2. the canonical `cross_host` example in the `oxidase` crate
+3. `oxidase-native-runner`
 
-This is needed for legitimate UI automation such as:
+If the stack does not compile on Windows, capture the exact blocker and stop expanding the scope.
 
-1. outside clicks
-2. clicking `body` / background containers
-3. blur dismissal flows
-4. future host surfaces where valid DOM nodes exist outside the Dioxus VDOM listener subtree
+### Stage 2 — Transport viability
 
-Do not conflate “no listener handled the event” with “target is invalid.”
+If the build succeeds, determine whether the transport is actually usable on Windows.
 
----
+Questions to answer:
 
-## 4. Preferred Response Shape
+1. does host descriptor publication work?
+2. does discovery work?
+3. does the current local IPC model work?
+4. if not, is the blocker specifically UDS/Unix-only or something else?
 
-If possible, do not encode the handled/unhandled distinction only in a message string.
+### Stage 3 — Minimal live attach proof
 
-Prefer a structured field such as:
+If transport is viable, prove the smallest useful native attach workflow on Windows:
 
-1. `handled: bool`
-or
-2. `dispatchState: "handled" | "unhandled"`
+1. launch a native target (`cross_host` and/or `oxidase-native-runner`)
+2. discover / attach
+3. inspect
 
-If that is too invasive for this pass, document clearly why you kept a message-based status instead.
+You do not need every single feature first — establish the minimal proof that the lane is alive.
 
-The goal is to make the success state machine-readable, not just human-readable.
+### Stage 4 — Modifier sentinel
 
----
+If minimal attach works, verify the platform-specific modifier proof case:
 
-## 5. Scope Boundary
+1. `Ctrl+A` on Windows
+2. overwrite / replace behavior after selection
 
-### Must implement
+This is the highest-value keyboard-specific parity check on Windows.
 
-1. optional `inspect -o`
-2. valid-node / unhandled-click success semantics
-3. proof that the new behavior works
+### Stage 5 — Pointer / capture smoke proof
 
-### Must not over-expand
+If earlier stages pass, smoke-test:
 
-1. do not redesign the whole response model unless needed
-2. do not turn this into generalized event bubbling work across every action type unless the change is naturally shared
-3. do not change unrelated capture behavior in this pass
+1. hover / move
+2. wheel / scroll
+3. capture
 
-Keep it to the two agreed improvements.
+This does not need to be a full exhaustive matrix unless the stack is already stable.
 
 ---
 
-## 6. Files / Areas to Reinspect
+## 4. Scope Boundary
 
-At minimum:
+### Must do
 
-1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
-2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/host.rs`
-6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
-7. any protocol types affected by the click status semantics or inspect metadata summary
+1. validate what currently works on Windows
+2. identify the first real blockers honestly
+3. distinguish “does not compile” from “compiles but attach path fails” from “attach works but specific features fail”
 
----
+### Must not do
 
-## 7. Validation You Must Run
+1. do not paper over Windows blockers with speculation
+2. do not treat macOS results as if they imply Windows parity
+3. do not jump to implementing a Windows transport redesign unless the blocker is conclusively identified and tiny to fix
 
-Run the smallest commands that honestly prove the new behavior.
-
-At minimum:
-
-1. verify `inspect -o <PATH>` writes the full JSON file and returns compact metadata JSON
-2. verify ordinary `inspect` still prints full JSON to `stdout`
-3. verify a valid selector such as `"body"` or another valid static container succeeds even if no Dioxus listener handles the click
-4. verify a missing selector/node still fails cleanly
-5. rerun the relevant `blitz-host` tests
-
-If markdown files are edited, validate them.
+This pass is about evidence first.
 
 ---
 
-## 8. `result.md` Requirement
+## 5. Specific Areas to Inspect
+
+At minimum inspect and/or validate:
+
+1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/` code that assumes Unix transport/filesystem behavior
+2. `crates/blitz-host-transport/src/discovery.rs`
+3. `crates/blitz-host-transport/src/server.rs`
+4. `crates/blitz-host/src/bin/blitz-host.rs`
+5. `util/oxidase/crates/oxidase/examples/cross_host/`
+6. `util/oxidase/crates/oxidase-native-runner/`
+
+If you are operating only on the Windows copy, inspect the equivalent Windows-side synced paths there.
+
+---
+
+## 6. Validation You Must Run
+
+Run the smallest commands that give real Windows evidence.
+
+At minimum, attempt the Windows equivalents of:
+
+1. `cargo check` / `cargo build` for `util/blitz-host`
+2. `cargo build` or `cargo run` for the `cross_host` native example
+3. `cargo build` or `cargo run` for `oxidase-native-runner`
+4. if the host launches, `blitz-host list`
+5. if attach works, `inspect`
+6. if attach and inspect work, `Ctrl+A` sentinel
+7. pointer / capture smoke proof if feasible
+
+Be explicit about which stages were actually reached.
+
+---
+
+## 7. `result.md` Requirement
 
 Update:
 
@@ -176,30 +167,26 @@ Update:
 
 It must explicitly record:
 
-1. what `inspect -o` now does
-2. what compact metadata JSON looks like
-3. how click resolution now distinguishes invalid vs unhandled vs handled targets
-4. whether handled/unhandled is exposed structurally or only in message text
-5. what validation proved the change
-6. what remains deferred
+1. whether Windows compile/build parity was achieved
+2. whether transport is viable on Windows
+3. whether attach / inspect works
+4. whether `Ctrl+A` works
+5. whether pointer / capture smoke proof works
+6. the first concrete blocker if the lane breaks
+7. what the next Windows-specific action should be
 
 ---
 
-## 9. Final Verdict Rule
+## 8. Final Verdict Rule
 
-You may report **Implemented and clarified** only if:
+You may report one of these:
 
-1. `inspect -o` works as specified
-2. valid-but-unhandled click targets are no longer treated as hard failures
-3. missing targets still fail cleanly
-4. the result is documented honestly
+1. **Windows lane works**
+2. **Windows lane partially works**
+3. **Windows lane blocked with evidence**
 
-Otherwise report:
-
-- **Partially implemented / still deferred**
-or
-- **Blocked with evidence**
+Your verdict must be based on the staged validation above, not assumptions.
 
 The purpose of this pass is:
 
-> make `blitz-host` less noisy for inspect consumers and more correct about what a successful click actually means.
+> establish the real Windows status of the current `blitz-host` / `oxidase` native lane before we decide what, if anything, needs Windows-specific redesign.
