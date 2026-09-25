@@ -1,4 +1,4 @@
-# Worker Instruction: Implement the Host Ambiguity Guard (`len == 1` implicit, `len >= 2` require `--pid`)
+# Worker Instruction: Add `inspect -o` and Fix DOM-Standard Click Resolution Semantics
 
 You are working in:
 
@@ -6,9 +6,10 @@ You are working in:
 /Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host
 ```
 
-The decision is now fixed:
+The next `blitz-host` pass now has two tightly-related goals:
 
-> **when there is exactly one live host, implicit auto-discovery is allowed; when there are multiple live hosts, silent guessing is forbidden and the caller must specify `--pid`**
+1. make `inspect` capable of spilling large JSON snapshots to a file via `-o/--output`
+2. fix click resolution semantics so that valid DOM targets without active Dioxus listeners succeed as unhandled clicks instead of hard errors
 
 Write all agent-facing reasoning in English.
 
@@ -25,75 +26,97 @@ Do not overclaim.
 
 ## 1. Core Goal
 
-Implement a deterministic ambiguity guard for host discovery.
+Implement two related improvements:
 
-The desired behavior is:
+### A. `inspect -o <PATH>`
 
-1. **0 live hosts** → clean “not found” error
-2. **1 live host** → auto-connect is allowed
-3. **2+ live hosts** → auto-connect is rejected; caller must provide `--pid <PID>` (or explicit descriptor/socket path if supported)
+Allow large inspect results to be written to disk while returning a compact metadata summary on `stdout`.
 
-This should eliminate silent mis-targeting while preserving zero-friction usage in the single-host case.
+### B. DOM-standard click resolution
 
----
+Separate:
 
-## 2. Architectural Rule
+1. **target does not exist** → error
+2. **target exists but no Dioxus listener handled the click** → success, but explicitly marked as unhandled
 
-This policy must live in the **transport/discovery layer**, not only in the CLI.
-
-That means:
-
-> the ambiguity rule should be the transport layer’s single source of truth, so both CLI users and programmatic API consumers get identical behavior.
-
-If the CLI alone enforces the rule, the programmatic client path can still behave differently, which is not acceptable.
+The goal is to make `blitz-host` more faithful to real DOM/UI interaction semantics and more usable for humans and agents.
 
 ---
 
-## 3. Required Behavior
+## 2. Required `inspect -o` Behavior
 
-### A. `TargetSelector::Auto`
+### Default behavior
 
-When the selector is implicit/auto:
+When `-o/--output` is **not** provided:
 
-1. `0` hosts → `NotFound`
-2. `1` host → return that host
-3. `2+` hosts → return an ambiguity error listing the competing PIDs and requiring `--pid`
+1. preserve current inspect behavior
+2. emit the full inspect JSON to `stdout`
 
-### B. `TargetSelector::Pid(pid)`
+### `-o/--output` behavior
 
-When the selector is explicit by PID:
+When `-o/--output <PATH>` is provided:
 
-1. connect to that PID if reachable
-2. error clearly if that PID is not present / not reachable
+1. write the full pretty JSON snapshot to the given file
+2. emit only compact metadata JSON on `stdout`
 
-### C. Explicit path targeting
+Reasonable metadata fields include:
 
-If explicit descriptor/socket path targeting already exists, preserve it.
+1. `success`
+2. `filePath`
+3. `rootId`
+4. `nodeCount`
+5. `bytes`
+6. `message`
 
-The ambiguity guard is specifically about implicit auto-discovery.
+This should help with:
+
+1. terminal readability
+2. smaller agent context usage
+3. cleaner CI logs
+
+`inspect -o` should remain optional, not mandatory.
 
 ---
 
-## 4. CLI Expectations
+## 3. Required Click Resolution Policy
 
-The CLI should be updated so that:
+### Distinguish target existence from listener handling
 
-1. `blitz-host list` shows available hosts clearly
-2. commands using auto-discovery fail fast with a clean error if multiple hosts are active
-3. the error explains how to recover:
-   - use `blitz-host list`
-   - then rerun with `--pid <PID>`
+The current/desired model must clearly separate:
 
-It is acceptable and desirable to centralize repeated connection boilerplate into one helper.
+1. **Selector / node does not resolve to a real DOM node**  
+   → error
+2. **Node exists, click dispatched, Dioxus listener handled it**  
+   → success
+3. **Node exists, click dispatched, but no Dioxus listener handled it**  
+   → still success, but clearly marked as unhandled
 
-### Preferred structure
+### Why this matters
 
-Prefer separating:
+This is needed for legitimate UI automation such as:
 
-1. selector determination
-2. client connection / ambiguity handling
+1. outside clicks
+2. clicking `body` / background containers
+3. blur dismissal flows
+4. future host surfaces where valid DOM nodes exist outside the Dioxus VDOM listener subtree
 
-into clean helper functions rather than copy-pasting connection logic across many subcommands.
+Do not conflate “no listener handled the event” with “target is invalid.”
+
+---
+
+## 4. Preferred Response Shape
+
+If possible, do not encode the handled/unhandled distinction only in a message string.
+
+Prefer a structured field such as:
+
+1. `handled: bool`
+or
+2. `dispatchState: "handled" | "unhandled"`
+
+If that is too invasive for this pass, document clearly why you kept a message-based status instead.
+
+The goal is to make the success state machine-readable, not just human-readable.
 
 ---
 
@@ -101,17 +124,17 @@ into clean helper functions rather than copy-pasting connection logic across man
 
 ### Must implement
 
-1. ambiguity guard in transport/discovery
-2. PID-based deterministic targeting in CLI paths that connect to a host
-3. shared connection plumbing so the rule is applied consistently
+1. optional `inspect -o`
+2. valid-node / unhandled-click success semantics
+3. proof that the new behavior works
 
-### Must not implement
+### Must not over-expand
 
-1. `--instance` visible CLI targeting
-2. same-process multi-window routing
-3. speculative broader target-selection complexity
+1. do not redesign the whole response model unless needed
+2. do not turn this into generalized event bubbling work across every action type unless the change is naturally shared
+3. do not change unrelated capture behavior in this pass
 
-This pass is specifically about the ambiguity guard and PID disambiguation.
+Keep it to the two agreed improvements.
 
 ---
 
@@ -121,28 +144,25 @@ At minimum:
 
 1. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/handoff.md`
 2. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/result.md`
-3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/discovery.rs`
-4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/src/client.rs`
-5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
+3. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/README.md`
+4. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/bin/blitz-host.rs`
+5. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host/src/host.rs`
+6. `/Volumes/HDD-1T-2021-Mac/Vault/business/project/mine/dioxus/util/blitz-host/crates/blitz-host-transport/`
+7. any protocol types affected by the click status semantics or inspect metadata summary
 
 ---
 
 ## 7. Validation You Must Run
 
-Run the smallest commands/tests that prove the ambiguity guard actually works.
+Run the smallest commands that honestly prove the new behavior.
 
 At minimum:
 
-1. unit tests for discovery behavior:
-   - zero hosts
-   - one host
-   - multiple hosts
-   - explicit PID
-2. CLI or integration proof showing:
-   - implicit success with one live host
-   - ambiguity failure with multiple live hosts
-   - deterministic success with `--pid`
-3. confirmation that existing attach / inspect / action paths still work after the change
+1. verify `inspect -o <PATH>` writes the full JSON file and returns compact metadata JSON
+2. verify ordinary `inspect` still prints full JSON to `stdout`
+3. verify a valid selector such as `"body"` or another valid static container succeeds even if no Dioxus listener handles the click
+4. verify a missing selector/node still fails cleanly
+5. rerun the relevant `blitz-host` tests
 
 If markdown files are edited, validate them.
 
@@ -156,11 +176,12 @@ Update:
 
 It must explicitly record:
 
-1. where the ambiguity rule lives
-2. what happens in the 0 / 1 / many host cases
-3. what CLI helper/plumbing was consolidated
-4. what validation proved the rule
-5. what remains deferred
+1. what `inspect -o` now does
+2. what compact metadata JSON looks like
+3. how click resolution now distinguishes invalid vs unhandled vs handled targets
+4. whether handled/unhandled is exposed structurally or only in message text
+5. what validation proved the change
+6. what remains deferred
 
 ---
 
@@ -168,11 +189,10 @@ It must explicitly record:
 
 You may report **Implemented and clarified** only if:
 
-1. implicit selection works only in the single-host case
-2. ambiguous multi-host auto-discovery fails fast and cleanly
-3. `--pid` deterministically resolves the target
-4. the rule is implemented in the transport/discovery layer, not just the CLI
-5. existing control-plane behavior still works
+1. `inspect -o` works as specified
+2. valid-but-unhandled click targets are no longer treated as hard failures
+3. missing targets still fail cleanly
+4. the result is documented honestly
 
 Otherwise report:
 
@@ -182,4 +202,4 @@ or
 
 The purpose of this pass is:
 
-> remove silent multi-host mis-targeting without destroying the convenient single-host workflow.
+> make `blitz-host` less noisy for inspect consumers and more correct about what a successful click actually means.

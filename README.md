@@ -49,8 +49,12 @@ blitz-host --help
 
 ### 2. Inspect Live Window or Subtree
 ```bash
-# Returns full semantic DOM tree with computed layout bounds as deterministic JSON
+# Returns full semantic DOM tree with computed layout bounds as deterministic JSON to stdout
 blitz-host inspect
+
+# Spill full DOM JSON to disk and output compact metadata summary on stdout
+blitz-host inspect -o target/dom.json
+blitz-host inspect "body" -o target/body.json
 
 # Inspect a specific subtree starting at CSS selector or node ID
 blitz-host inspect "#mouse-test-card"

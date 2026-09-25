@@ -143,11 +143,12 @@ USAGE:
 
 ARGUMENTS:
     [TARGET]                 Optional root element specified by numeric node ID or CSS selector
-                             to inspect only a specific subtree (e.g. 4294967464, "#test-input").
+                             to inspect only a specific subtree (e.g. 4294967464, "#test-input", "body").
     [DESCRIPTOR_PATH]        Path to host descriptor JSON file or UDS socket.
                              If omitted, auto-discovers the active running Blitz window.
 
 OPTIONS:
+    -o, --output <PATH>      Save full formatted DOM JSON to file and print compact metadata on stdout
     --node, -n <NODE_ID>     Target specific root node/subtree ID
     --selector, -s <SEL>     Target specific root element by CSS selector
         --pid <PID>          Target specific host process by OS process ID
@@ -155,12 +156,15 @@ OPTIONS:
     -h, --help               Print help information
 
 OUTPUT:
-    Always returns typed InspectResponse JSON on stdout.
+    When -o/--output is omitted: prints full InspectResponse JSON to stdout.
+    When -o/--output <PATH> is provided: saves full JSON to disk and prints compact metadata JSON to stdout.
 
 EXAMPLES:
     blitz-host inspect
+    blitz-host inspect -o dom.json
     blitz-host inspect 4294967464
     blitz-host inspect "#test-input"
+    blitz-host inspect "body" -o target/body.json
     blitz-host inspect --selector "#test-input"
     blitz-host inspect --pid 37462
 "##
@@ -629,16 +633,43 @@ fn determine_selector(args: &[String]) -> TargetSelector {
     if let Some(pid) = parse_pid_arg(args) {
         return TargetSelector::Pid(pid);
     }
-    let explicit_path = args
-        .iter()
-        .find(|a| !a.starts_with('-') && (a.ends_with(".json") || a.ends_with(".sock")))
-        .map(PathBuf::from);
-
-    if let Some(path) = explicit_path {
-        TargetSelector::ExplicitPath(path)
-    } else {
-        TargetSelector::Auto
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "-o"
+            || arg == "--output"
+            || arg == "--node"
+            || arg == "-n"
+            || arg == "--selector"
+            || arg == "-s"
+            || arg == "--pid"
+            || arg == "--window"
+            || arg == "--window-id"
+        {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--output=")
+            || arg.starts_with("-o=")
+            || arg.starts_with("--node=")
+            || arg.starts_with("-n=")
+            || arg.starts_with("--selector=")
+            || arg.starts_with("-s=")
+            || arg.starts_with("--pid=")
+            || arg.starts_with("--window=")
+            || arg.starts_with("--window-id=")
+            || arg.starts_with('-')
+        {
+            continue;
+        }
+        if arg.ends_with(".json") || arg.ends_with(".sock") {
+            return TargetSelector::ExplicitPath(PathBuf::from(arg));
+        }
     }
+    TargetSelector::Auto
 }
 
 /// Connect to Blitz host matching the selector, exiting cleanly with code 1 if connection or ambiguity fails.
@@ -1208,6 +1239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
+            let output_path = parse_output_arg(subargs);
             let window_id = parse_window_arg(subargs);
             let selector = determine_selector(subargs);
 
@@ -1219,7 +1251,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     skip_next = false;
                     continue;
                 }
-                if arg == "--node"
+                if arg == "-o"
+                    || arg == "--output"
+                    || arg == "--node"
                     || arg == "-n"
                     || arg == "--selector"
                     || arg == "-s"
@@ -1230,7 +1264,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     skip_next = true;
                     continue;
                 }
-                if arg.starts_with('-') || arg.ends_with(".sock") || arg.ends_with(".json") {
+                if arg.starts_with("--output=")
+                    || arg.starts_with("-o=")
+                    || arg.starts_with("--node=")
+                    || arg.starts_with("-n=")
+                    || arg.starts_with("--selector=")
+                    || arg.starts_with("-s=")
+                    || arg.starts_with("--pid=")
+                    || arg.starts_with("--window=")
+                    || arg.starts_with("--window-id=")
+                    || arg.starts_with('-')
+                    || arg.ends_with(".sock")
+                    || arg.ends_with(".json")
+                {
                     continue;
                 }
                 positional.push(arg.as_str());
@@ -1252,7 +1298,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             let response = client.inspect(req)?;
-            println!("{}", serde_json::to_string_pretty(&response)?);
+
+            if let Some(target_file) = output_path {
+                let json_str = serde_json::to_string_pretty(&response)?;
+                let bytes = json_str.len();
+                if let Some(parent) = target_file.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                }
+                std::fs::write(&target_file, &json_str).map_err(|e| {
+                    std::io::Error::new(
+                        e.kind(),
+                        format!("Failed to write inspection output to {}: {e}", target_file.display()),
+                    )
+                })?;
+
+                let abs_path = std::fs::canonicalize(&target_file).unwrap_or(target_file);
+                let metadata = serde_json::json!({
+                    "success": true,
+                    "filePath": abs_path.to_string_lossy(),
+                    "rootId": response.root_id,
+                    "nodeCount": response.node_count,
+                    "bytes": bytes,
+                    "message": format!(
+                        "Saved DOM inspection snapshot ({} nodes) to {}",
+                        response.node_count,
+                        abs_path.display()
+                    )
+                });
+                println!("{}", serde_json::to_string_pretty(&metadata)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&response)?);
+            }
+
             if response.node_count == 0 && response.message.is_some() {
                 if let Some(msg) = &response.message {
                     eprintln!("Error: {msg}");

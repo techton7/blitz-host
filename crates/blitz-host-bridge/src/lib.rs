@@ -62,6 +62,7 @@ mod tests {
                     Ok(blitz_host_protocol::ActionResponse {
                         success: true,
                         node_id: nid,
+                        handled: None,
                         message: Some("focused".into()),
                     })
                 }

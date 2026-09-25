@@ -191,23 +191,32 @@ impl HostControl {
             ActionRequest::Click { .. } => {
                 let node_id = resolved_target
                     .ok_or_else(|| "Click requires a target node or selector".to_string())?;
-                if click_fn(base_doc, node_id) {
-                    Ok(ActionResponse {
-                        success: true,
-                        node_id,
-                        message: Some(format!("Dispatched synthetic click to node #{node_id}")),
-                    })
-                } else {
-                    Err(format!("Node #{node_id} or active listener not found in document"))
-                }
+                let _ = base_doc
+                    .get_node(blitz_dom::NodeId::from_u64(node_id))
+                    .ok_or_else(|| format!("Node #{node_id} not found in document"))?;
+                let handled = click_fn(base_doc, node_id);
+                Ok(ActionResponse {
+                    success: true,
+                    node_id,
+                    handled: Some(handled),
+                    message: Some(if handled {
+                        format!("Dispatched synthetic click to node #{node_id} (handled by listener)")
+                    } else {
+                        format!("Dispatched synthetic click to node #{node_id} (unhandled, background click)")
+                    }),
+                })
             }
             ActionRequest::Focus { .. } => {
                 let node_id = resolved_target
                     .ok_or_else(|| "Focus requires a target node or selector".to_string())?;
+                let _ = base_doc
+                    .get_node(blitz_dom::NodeId::from_u64(node_id))
+                    .ok_or_else(|| format!("Node #{node_id} not found in document"))?;
                 if focus_fn(base_doc, node_id) {
                     Ok(ActionResponse {
                         success: true,
                         node_id,
+                        handled: Some(true),
                         message: Some(format!("Dispatched synthetic focus to node #{node_id}")),
                     })
                 } else {
@@ -221,6 +230,7 @@ impl HostControl {
                     Ok(ActionResponse {
                         success: true,
                         node_id,
+                        handled: None,
                         message: Some(format!("Set value on node #{node_id}")),
                     })
                 } else {
@@ -232,6 +242,7 @@ impl HostControl {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
+                        handled: None,
                         message: Some(format!("Dispatched synthetic key '{key}' to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
@@ -246,6 +257,7 @@ impl HostControl {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
+                        handled: None,
                         message: Some(format!("Dispatched synthetic mouse move to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse move: {e}")),
@@ -260,6 +272,7 @@ impl HostControl {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
+                        handled: None,
                         message: Some(format!("Dispatched synthetic mouse down to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse down: {e}")),
@@ -274,6 +287,7 @@ impl HostControl {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
+                        handled: None,
                         message: Some(format!("Dispatched synthetic mouse up to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch mouse up: {e}")),
@@ -288,6 +302,7 @@ impl HostControl {
                     Ok(target_nid) => Ok(ActionResponse {
                         success: true,
                         node_id: target_nid,
+                        handled: None,
                         message: Some(format!("Dispatched synthetic wheel ({delta_x}, {delta_y}) to node #{target_nid}")),
                     }),
                     Err(e) => Err(format!("Failed to dispatch wheel: {e}")),
@@ -317,15 +332,20 @@ impl HostControl {
                 )?;
                 let node_id = resolved
                     .ok_or_else(|| "Click requires a target node or selector".to_string())?;
-                if click_fn(base_doc, node_id) {
-                    Ok(ActionResponse {
-                        success: true,
-                        node_id,
-                        message: Some(format!("Dispatched synthetic click to node #{node_id}")),
-                    })
-                } else {
-                    Err(format!("Node #{node_id} or active listener not found in document"))
-                }
+                let _ = base_doc
+                    .get_node(blitz_dom::NodeId::from_u64(node_id))
+                    .ok_or_else(|| format!("Node #{node_id} not found in document"))?;
+                let handled = click_fn(base_doc, node_id);
+                Ok(ActionResponse {
+                    success: true,
+                    node_id,
+                    handled: Some(handled),
+                    message: Some(if handled {
+                        format!("Dispatched synthetic click to node #{node_id} (handled by listener)")
+                    } else {
+                        format!("Dispatched synthetic click to node #{node_id} (unhandled, background click)")
+                    }),
+                })
             }
             other => Err(format!("Action {other:?} not supported by handle_action_click")),
         }

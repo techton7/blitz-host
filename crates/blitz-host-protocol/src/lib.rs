@@ -468,6 +468,9 @@ pub struct ActionResponse {
     pub success: bool,
     /// Target node ID that received the action.
     pub node_id: u64,
+    /// Whether an active event listener intercepted and handled this action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handled: Option<bool>,
     /// Optional status or failure message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -739,11 +742,26 @@ mod tests {
         let act_resp = ControlResponse::ActionSuccess(ActionResponse {
             success: true,
             node_id: 42,
+            handled: Some(true),
             message: Some("clicked".into()),
         });
         let act_resp_json = serde_json::to_string(&act_resp).unwrap();
+        assert!(act_resp_json.contains("\"handled\":true"));
         let act_resp_parsed: ControlResponse = serde_json::from_str(&act_resp_json).unwrap();
         assert_eq!(act_resp, act_resp_parsed);
+
+        // Test backward compatibility without handled field
+        let legacy_json = r#"{"status":"actionSuccess","data":{"success":true,"nodeId":42,"message":"legacy"}}"#;
+        let legacy_resp: ControlResponse = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(
+            legacy_resp,
+            ControlResponse::ActionSuccess(ActionResponse {
+                success: true,
+                node_id: 42,
+                handled: None,
+                message: Some("legacy".into()),
+            })
+        );
 
         // Test Settle roundtrip
         let settle_req = ControlRequest::Settle(SettleRequest {
