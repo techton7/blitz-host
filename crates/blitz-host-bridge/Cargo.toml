@@ -9,10 +9,10 @@ homepage.workspace = true
 description = "Runtime host bridge connecting live Blitz DOM and Winit to blitz-host"
 
 [dependencies]
-blitz-host-protocol = { version = "0.1.1", path = "../blitz-host-protocol" }
-blitz-host-transport = { version = "0.1.1", path = "../blitz-host-transport" }
-blitz-dom = { version = "0.3.0-beta.2", default-features = false }
-blitz-paint = { version = "0.3.0-beta.2", default-features = false }
+blitz-host-protocol = { version = "0.1.2", path = "../blitz-host-protocol" }
+blitz-host-transport = { version = "0.1.2", path = "../blitz-host-transport" }
+blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.2", default-features = false }
+blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "v0.3.0-alpha.2", default-features = false }
 anyrender = "0.13.0"
 anyrender_vello_cpu = "0.17.0"
 peniko = "0.6.0"
