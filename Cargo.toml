@@ -16,10 +16,10 @@ repository = "https://github.com/techton7/blitz-host"
 homepage = "https://github.com/techton7/blitz-host"
 
 [patch.crates-io]
-blitz-shell = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0" }
-blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0" }
-blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0" }
-blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0" }
+blitz-shell = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0" }
+blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0" }
+blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0" }
+blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0" }
 wgpu_context = { git = "https://github.com/techton7/anyrender", tag = "wgpu_context-v0.9.1-win-policy" }
 
 

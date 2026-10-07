@@ -51,7 +51,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
                 let role = elem
                     .attrs
                     .iter()
-                    .find(|a| a.name.local.as_ref() == "role")
+                    .find(|a| &*a.name.local == "role")
                     .map(|a| a.value.to_string());
                 let text = elem
                     .text_input_data()
@@ -59,7 +59,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
                     .or_else(|| {
                         elem.attrs
                             .iter()
-                            .find(|a| a.name.local.as_ref() == "value")
+                            .find(|a| &*a.name.local == "value")
                             .map(|a| a.value.to_string())
                     });
                 (tag, dom_id, role, text)

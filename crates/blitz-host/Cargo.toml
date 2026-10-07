@@ -12,13 +12,13 @@ description = "Canonical facade, CLI, and host control plane for live Blitz desk
 blitz-host-protocol = { version = "0.1.4", path = "../blitz-host-protocol" }
 blitz-host-transport = { version = "0.1.4", path = "../blitz-host-transport" }
 blitz-host-bridge = { version = "0.1.4", path = "../blitz-host-bridge" }
-blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0", default-features = false }
+blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Optional Dioxus Native integration
 dioxus = { version = "0.7.10", default-features = false, features = ["hooks", "signals", "macro", "html"], optional = true }
-dioxus-native = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.1.0", optional = true }
+dioxus-native = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.0", optional = true }
 keyboard-types = { version = "0.7", optional = true }
 
 [features]
