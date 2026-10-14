@@ -25,7 +25,7 @@ impl DebugClient {
     pub fn connect(descriptor: HostDescriptor) -> io::Result<Self> {
         let name = socket_name_from_str(&descriptor.socket_path)?;
         let stream = Stream::connect(name)?;
-        let _ = stream.set_recv_timeout(Some(Duration::from_secs(5)));
+        let _ = stream.set_recv_timeout(Some(Duration::from_secs(8)));
         let _ = stream.set_send_timeout(Some(Duration::from_secs(5)));
         let reader = BufReader::new(stream.try_clone()?);
 
@@ -69,7 +69,20 @@ impl DebugClient {
         self.stream.flush()?;
 
         let mut resp_line = String::new();
-        let bytes_read = self.reader.read_line(&mut resp_line)?;
+        let bytes_read = self.reader.read_line(&mut resp_line).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.kind() == std::io::ErrorKind::TimedOut
+            {
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "Control server response timed out after 8s (socket recv timeout): {err}. Ensure the host UI thread event loop is actively servicing requests."
+                    ),
+                )
+            } else {
+                err
+            }
+        })?;
         if bytes_read == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,

@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use blitz_dom::BaseDocument;
+pub use blitz_host_bridge::ServiceResult;
 use blitz_host_bridge::{HostBridge, resolve_target_in_doc};
 use blitz_host_protocol::{ActionRequest, ActionResponse, HostDescriptor};
 use blitz_host_transport::DebugServer;
@@ -120,13 +121,41 @@ impl HostControl {
         }
     }
 
+    /// Register or replace the event loop waker callback.
+    pub fn set_waker(&mut self, wake: impl Fn() + Send + Sync + 'static) {
+        self.server.set_waker(wake);
+    }
+
+    /// Clear the event loop waker callback.
+    pub fn clear_waker(&mut self) {
+        self.server.clear_waker();
+    }
+
+    /// Register or replace the event loop waker callback on the process-global singleton if active.
+    pub fn set_global_waker(wake: impl Fn() + Send + Sync + 'static) {
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
+            if let Some(ctrl) = guard.as_mut() {
+                ctrl.set_waker(wake);
+            }
+        }
+    }
+
+    /// Clear the event loop waker callback on the process-global singleton if active.
+    pub fn clear_global_waker() {
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
+            if let Some(ctrl) = guard.as_mut() {
+                ctrl.clear_waker();
+            }
+        }
+    }
+
     /// Polls and services pending control requests against the live BaseDocument.
     pub fn poll_and_service<F>(
         &mut self,
         doc: &mut BaseDocument,
         current_frame: u64,
         dispatch_action: F,
-    ) -> usize
+    ) -> ServiceResult
     where
         F: FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     {
@@ -140,12 +169,12 @@ impl HostControl {
 
     /// Services the process-global HostControl instance on the UI thread for the current frame.
     ///
-    /// Returns the number of requests serviced during this turn.
+    /// Returns the detailed [`ServiceResult`] summary during this turn.
     pub fn service_global_frame<F>(
         doc: &mut BaseDocument,
         current_frame: u64,
         dispatch_action: F,
-    ) -> usize
+    ) -> ServiceResult
     where
         F: FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     {
@@ -154,7 +183,7 @@ impl HostControl {
                 return ctrl.poll_and_service(doc, current_frame, dispatch_action);
             }
         }
-        0
+        ServiceResult::default()
     }
 
     /// Dispatches UI actions (Click, Focus, SetValue, Key, MouseMove, MouseDown, MouseUp, Wheel) using provided closures.
@@ -470,4 +499,87 @@ pub fn init_if_debug(app_name: &str, app_version: &str) -> bool {
 /// Backward-compatible alias for [`init_default`].
 pub fn init_if_debug_default() -> bool {
     init_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_set_and_clear_waker_on_instance() {
+        let mut ctrl = match HostControl::start("test-app-inst", "0.1.0") {
+            Some(ctrl) => ctrl,
+            None => return,
+        };
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = Arc::clone(&called);
+        ctrl.set_waker(move || {
+            called_clone.store(true, Ordering::SeqCst);
+        });
+
+        ctrl.server.waker().wake();
+        assert!(called.load(Ordering::SeqCst));
+
+        called.store(false, Ordering::SeqCst);
+        ctrl.clear_waker();
+        ctrl.server.waker().wake();
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_global_waker_lifecycle_and_service_default() {
+        // Safe when GLOBAL_HOST_CONTROL is None
+        *GLOBAL_HOST_CONTROL.lock().unwrap() = None;
+        HostControl::set_global_waker(|| {});
+        HostControl::clear_global_waker();
+
+        let mut doc = BaseDocument::new(blitz_dom::DocumentConfig::default());
+        let res = HostControl::service_global_frame(&mut doc, 0, |_, _| Err("no-op".into()));
+        assert_eq!(res, ServiceResult::default());
+    }
+
+    #[test]
+    fn test_global_waker_active_instance() {
+        let ctrl = match HostControl::start("test-app-global", "0.1.0") {
+            Some(ctrl) => ctrl,
+            None => return,
+        };
+
+        let waker = ctrl.server.waker();
+        *GLOBAL_HOST_CONTROL.lock().unwrap() = Some(ctrl);
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = Arc::clone(&called);
+        HostControl::set_global_waker(move || {
+            called_clone.store(true, Ordering::SeqCst);
+        });
+
+        waker.wake();
+        assert!(called.load(Ordering::SeqCst));
+
+        called.store(false, Ordering::SeqCst);
+        HostControl::clear_global_waker();
+        waker.wake();
+        assert!(!called.load(Ordering::SeqCst));
+
+        // Clean up global singleton
+        *GLOBAL_HOST_CONTROL.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn test_poll_and_service_returns_service_result() {
+        let mut ctrl = match HostControl::start("test-app-poll", "0.1.0") {
+            Some(ctrl) => ctrl,
+            None => return,
+        };
+
+        let mut doc = BaseDocument::new(blitz_dom::DocumentConfig::default());
+        let res = ctrl.poll_and_service(&mut doc, 0, |_, _| Err("no-op".into()));
+        assert_eq!(res, ServiceResult::default());
+        assert_eq!(res.serviced(), 0);
+        assert!(!res.needs_redraw);
+    }
 }

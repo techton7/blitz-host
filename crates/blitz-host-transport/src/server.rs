@@ -134,6 +134,16 @@ impl DebugServer {
         self.waker.clone()
     }
 
+    /// Register or replace the wake callback used to notify the UI thread.
+    pub fn set_waker(&self, wake: impl Fn() + Send + Sync + 'static) {
+        self.waker.set(wake);
+    }
+
+    /// Clear the wake callback.
+    pub fn clear_waker(&self) {
+        self.waker.clear();
+    }
+
     /// Access the published host descriptor.
     pub fn descriptor(&self) -> &HostDescriptor {
         &self.descriptor

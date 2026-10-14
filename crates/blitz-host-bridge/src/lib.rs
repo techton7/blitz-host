@@ -8,7 +8,7 @@ pub mod capture;
 pub mod inspect;
 pub mod target;
 
-pub use bridge::HostBridge;
+pub use bridge::{HostBridge, ServiceResult};
 pub use capture::{capture_document, capture_document_node_png, capture_document_png};
 pub use inspect::inspect_document;
 pub use target::resolve_target_in_doc;
@@ -68,7 +68,10 @@ mod tests {
             }
             _ => Err("unsupported".into()),
         });
-        assert_eq!(serviced, 1);
+        assert_eq!(serviced.responded, 1);
+        assert_eq!(serviced.serviced(), 1);
+        assert_eq!(serviced.pending_settles, 0);
+        assert!(serviced.needs_redraw);
         let resp = focus_resp_rx.recv().unwrap();
         assert!(matches!(resp, ControlResponse::ActionSuccess(_)));
 
@@ -118,7 +121,10 @@ mod tests {
         .unwrap();
 
         let serviced = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
-        assert_eq!(serviced, 1);
+        assert_eq!(serviced.responded, 1);
+        assert_eq!(serviced.serviced(), 1);
+        assert_eq!(serviced.pending_settles, 0);
+        assert!(!serviced.needs_redraw);
 
         let resp = cap_resp_rx.recv().unwrap();
         match resp {
@@ -151,7 +157,10 @@ mod tests {
         .unwrap();
 
         let serviced2 = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
-        assert_eq!(serviced2, 1);
+        assert_eq!(serviced2.responded, 1);
+        assert_eq!(serviced2.serviced(), 1);
+        assert_eq!(serviced2.pending_settles, 0);
+        assert!(!serviced2.needs_redraw);
 
         let resp2 = node_resp_rx.recv().unwrap();
         match resp2 {
@@ -164,5 +173,134 @@ mod tests {
             }
             other => panic!("expected CaptureSuccess with failure status, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_settle_multi_frame_redraw_chaining() {
+        use blitz_host_protocol::{ControlRequest, ControlResponse, SettleRequest};
+        use blitz_host_transport::ControlBridgeRequest;
+        use std::sync::mpsc::{channel, sync_channel};
+
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let (tx, rx) = channel::<ControlBridgeRequest>();
+        let mut bridge = HostBridge::new(rx);
+
+        let (settle_resp_tx, settle_resp_rx) = sync_channel(1);
+        tx.send(ControlBridgeRequest {
+            request: ControlRequest::Settle(SettleRequest {
+                window_id: None,
+                frames: 3,
+            }),
+            reply: settle_resp_tx,
+        })
+        .unwrap();
+
+        // Frame 0: Registers the 3-frame settle request (target_frame = 0 + 3 = 3)
+        let res0 = bridge.poll_and_service_with(&mut doc, 0, |_, _| Err("no actions".into()));
+        assert_eq!(res0.responded, 0);
+        assert_eq!(res0.pending_settles, 1);
+        assert!(res0.needs_redraw);
+
+        // Frame 1: Returns needs_redraw = true while still awaiting future frames
+        let res1 = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
+        assert_eq!(res1.responded, 0);
+        assert_eq!(res1.pending_settles, 1);
+        assert!(res1.needs_redraw);
+
+        // Frame 2: Still returns needs_redraw = true
+        let res2 = bridge.poll_and_service_with(&mut doc, 2, |_, _| Err("no actions".into()));
+        assert_eq!(res2.responded, 0);
+        assert_eq!(res2.pending_settles, 1);
+        assert!(res2.needs_redraw);
+
+        // Frame 3: Resolves on frame 3 with responded = 1, pending_settles = 0, needs_redraw = false
+        let res3 = bridge.poll_and_service_with(&mut doc, 3, |_, _| Err("no actions".into()));
+        assert_eq!(res3.responded, 1);
+        assert_eq!(res3.pending_settles, 0);
+        assert!(!res3.needs_redraw);
+
+        let resp = settle_resp_rx.recv().unwrap();
+        match resp {
+            ControlResponse::SettleSuccess(settle) => {
+                assert!(settle.settled);
+                assert_eq!(settle.frames_waited, 3);
+                assert_eq!(settle.current_frame, 3);
+            }
+            other => panic!("expected SettleSuccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_act_triggers_needs_redraw() {
+        use blitz_host_protocol::{ActionRequest, ActionResponse, ControlRequest, ControlResponse};
+        use blitz_host_transport::ControlBridgeRequest;
+        use std::sync::mpsc::{channel, sync_channel};
+
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let root_id = doc.root_node().id;
+
+        let (tx, rx) = channel::<ControlBridgeRequest>();
+        let mut bridge = HostBridge::new(rx);
+
+        let (act_resp_tx, act_resp_rx) = sync_channel(1);
+        tx.send(ControlBridgeRequest {
+            request: ControlRequest::Act(ActionRequest::Focus {
+                window_id: None,
+                node_id: Some(root_id.as_u64()),
+                selector: None,
+                target: None,
+            }),
+            reply: act_resp_tx,
+        })
+        .unwrap();
+
+        let serviced = bridge.poll_and_service_with(&mut doc, 1, |act, d| match act {
+            ActionRequest::Focus { node_id, .. } => {
+                let nid = node_id.unwrap();
+                d.set_focus_to(blitz_dom::NodeId::from_u64(nid));
+                Ok(ActionResponse {
+                    success: true,
+                    node_id: nid,
+                    handled: None,
+                    message: Some("focused".into()),
+                })
+            }
+            _ => Err("unsupported".into()),
+        });
+
+        assert_eq!(serviced.responded, 1);
+        assert_eq!(serviced.serviced(), 1);
+        assert_eq!(serviced.pending_settles, 0);
+        assert!(serviced.needs_redraw, "Act request must set needs_redraw = true");
+
+        let resp = act_resp_rx.recv().unwrap();
+        assert!(matches!(resp, ControlResponse::ActionSuccess(_)));
+    }
+
+    #[test]
+    fn test_inspect_does_not_need_redraw() {
+        use blitz_host_protocol::{ControlRequest, ControlResponse};
+        use blitz_host_transport::ControlBridgeRequest;
+        use std::sync::mpsc::{channel, sync_channel};
+
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let (tx, rx) = channel::<ControlBridgeRequest>();
+        let mut bridge = HostBridge::new(rx);
+
+        let (inspect_resp_tx, inspect_resp_rx) = sync_channel(1);
+        tx.send(ControlBridgeRequest {
+            request: ControlRequest::Inspect(InspectRequest::default()),
+            reply: inspect_resp_tx,
+        })
+        .unwrap();
+
+        let serviced = bridge.poll_and_service_with(&mut doc, 1, |_, _| Err("no actions".into()));
+        assert_eq!(serviced.responded, 1);
+        assert_eq!(serviced.serviced(), 1);
+        assert_eq!(serviced.pending_settles, 0);
+        assert!(!serviced.needs_redraw, "Inspect request must not require redraw");
+
+        let resp = inspect_resp_rx.recv().unwrap();
+        assert!(matches!(resp, ControlResponse::InspectSuccess(_)));
     }
 }

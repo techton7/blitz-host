@@ -150,17 +150,32 @@ fn test_live_cli_attach_and_inspect_named_pipe() {
     assert_eq!(inspect_json["nodes"][1]["tag"], "button");
     assert_eq!(inspect_json["nodes"][1]["domId"], "submit-btn");
 
-    // 3. Test blitz-host inspect by explicit selector (Auto discovery since single host)
-    println!("Testing 'blitz-host inspect' auto-discovering single host...");
+    // 3. Test blitz-host inspect by auto discovery (if single host, succeeds; if multiple hosts, must reject ambiguity)
+    println!("Testing 'blitz-host inspect' auto-discovery behavior...");
     let auto_inspect_output = Command::new(&cli_path)
         .arg("inspect")
         .output()
         .expect("blitz-host auto inspect failed");
-    assert!(auto_inspect_output.status.success());
-    let auto_json: serde_json::Value =
-        serde_json::from_str(String::from_utf8_lossy(&auto_inspect_output.stdout).trim())
-            .expect("auto inspect must output valid JSON");
-    assert_eq!(auto_json["documentId"], 1);
+    let active_hosts = blitz_host_transport::list_hosts().expect("list_hosts must succeed");
+    if active_hosts.len() == 1 {
+        assert!(
+            auto_inspect_output.status.success(),
+            "blitz-host auto inspect must succeed when single host is present"
+        );
+        let auto_json: serde_json::Value =
+            serde_json::from_str(String::from_utf8_lossy(&auto_inspect_output.stdout).trim())
+                .expect("auto inspect must output valid JSON");
+        assert_eq!(auto_json["documentId"], 1);
+    } else {
+        println!(
+            "Multiple hosts active (count: {}); verifying auto-discovery rejects ambiguity cleanly",
+            active_hosts.len()
+        );
+        assert!(
+            !auto_inspect_output.status.success(),
+            "blitz-host auto inspect must fail when multiple hosts compete for auto-discovery"
+        );
+    }
 
     // 4. Test blitz-host inspect by EXPLICIT Named Pipe endpoint via CLI
     println!(

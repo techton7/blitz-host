@@ -46,11 +46,23 @@ use crate::host::HostControl;
 /// this component simply renders `children` with zero overhead.
 #[component]
 pub fn BlitzHost(children: Element) -> Element {
-    // Attempt automatic fallback initialization if not already initialized
+    let window = dioxus_native::use_window();
+    let window_for_redraw = window.clone();
+
+    // Attempt automatic fallback initialization and register event loop waker
     use_hook(|| {
         if !HostControl::is_global_active() && HostControl::is_enabled() {
             crate::host::init_default();
         }
+        let window_for_wake = window.clone();
+        HostControl::set_global_waker(move || {
+            window_for_wake.request_redraw();
+        });
+        window.request_redraw();
+    });
+
+    use_drop(|| {
+        HostControl::clear_global_waker();
     });
 
     let live_handle =
@@ -59,8 +71,6 @@ pub fn BlitzHost(children: Element) -> Element {
     let handle_for_event = live_handle.clone();
 
     let frame_counter = use_hook(|| Cell::new(0u64));
-    let window = dioxus_native::use_window();
-    let window_for_redraw = window.clone();
 
     // Listen to native window redraw requests to service control requests
     dioxus_native::use_window_event(move |event, _target| {
@@ -73,7 +83,7 @@ pub fn BlitzHost(children: Element) -> Element {
 
             if let Some(handle) = handle_for_event.borrow().as_ref() {
                 let mut doc = handle.doc_mut();
-                let serviced =
+                let result =
                     HostControl::service_global_frame(&mut doc, frame, |action_req, base_doc| {
                         HostControl::handle_action(
                             action_req,
@@ -243,7 +253,7 @@ pub fn BlitzHost(children: Element) -> Element {
                         )
                     });
 
-                if serviced > 0 {
+                if result.needs_redraw {
                     window_for_redraw.request_redraw();
                 }
             }
