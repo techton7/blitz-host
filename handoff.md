@@ -49,7 +49,7 @@ When `blitz-host inspect "body"` or `blitz-host capture "body"` runs, Blitz's St
 #### B. The Root Cause of `mouse click "body"` Failure
 When executing `blitz-host mouse click "body"`:
 1. `querySelector("body")` successfully resolves the target to `NodeId(4294967300)`.
-2. `blitz-host` calls `dioxus_native::dispatch_synthetic_click(doc, node_id, modifiers)`.
+2. `blitz-host` calls `blitz_host::dispatch::dispatch_click(doc, node_id, modifiers)`.
 3. In `dioxus-native-dom/src/events.rs:680-696`:
    ```rust
    let mut current = Some(node_id);

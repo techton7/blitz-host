@@ -27,7 +27,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use dioxus::prelude::*;
+use dioxus_native::prelude::*;
 use dioxus_native::winit::event::WindowEvent;
 
 use crate::host::HostControl;
@@ -89,20 +89,20 @@ pub fn BlitzHost(children: Element) -> Element {
                             action_req,
                             base_doc,
                             |d, nid| {
-                                dioxus_native::dispatch_synthetic_click(
+                                crate::dispatch::dispatch_click(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
                                     keyboard_types::Modifiers::empty(),
                                 )
                             },
                             |d, nid| {
-                                dioxus_native::dispatch_synthetic_focus(
+                                crate::dispatch::dispatch_focus(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
                                 )
                             },
                             |d, nid, val| {
-                                dioxus_native::dispatch_synthetic_input(
+                                crate::dispatch::dispatch_input(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
                                     val,
@@ -121,10 +121,10 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::ALT;
                                     }
                                     if m.meta {
-                                        kb_mods |= keyboard_types::Modifiers::SUPER;
+                                        kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                dioxus_native::dispatch_synthetic_key(
+                                crate::dispatch::dispatch_key(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     key,
@@ -145,10 +145,10 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::ALT;
                                     }
                                     if m.meta {
-                                        kb_mods |= keyboard_types::Modifiers::SUPER;
+                                        kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                dioxus_native::dispatch_synthetic_pointer_move(
+                                crate::dispatch::dispatch_pointer_move(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -169,19 +169,19 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::ALT;
                                     }
                                     if m.meta {
-                                        kb_mods |= keyboard_types::Modifiers::SUPER;
+                                        kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
                                 let button = match btn {
                                     Some("right") | Some("secondary") => {
-                                        dioxus_native::MouseEventButton::Secondary
+                                        crate::dispatch::MouseEventButton::Secondary
                                     }
                                     Some("middle") | Some("auxiliary") => {
-                                        dioxus_native::MouseEventButton::Auxiliary
+                                        crate::dispatch::MouseEventButton::Auxiliary
                                     }
-                                    _ => dioxus_native::MouseEventButton::Main,
+                                    _ => crate::dispatch::MouseEventButton::Main,
                                 };
-                                dioxus_native::dispatch_synthetic_pointer_down(
+                                crate::dispatch::dispatch_pointer_down(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -203,19 +203,19 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::ALT;
                                     }
                                     if m.meta {
-                                        kb_mods |= keyboard_types::Modifiers::SUPER;
+                                        kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
                                 let button = match btn {
                                     Some("right") | Some("secondary") => {
-                                        dioxus_native::MouseEventButton::Secondary
+                                        crate::dispatch::MouseEventButton::Secondary
                                     }
                                     Some("middle") | Some("auxiliary") => {
-                                        dioxus_native::MouseEventButton::Auxiliary
+                                        crate::dispatch::MouseEventButton::Auxiliary
                                     }
-                                    _ => dioxus_native::MouseEventButton::Main,
+                                    _ => crate::dispatch::MouseEventButton::Main,
                                 };
-                                dioxus_native::dispatch_synthetic_pointer_up(
+                                crate::dispatch::dispatch_pointer_up(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -237,10 +237,10 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::ALT;
                                     }
                                     if m.meta {
-                                        kb_mods |= keyboard_types::Modifiers::SUPER;
+                                        kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                dioxus_native::dispatch_synthetic_wheel(
+                                crate::dispatch::dispatch_wheel(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,

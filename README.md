@@ -153,7 +153,7 @@ fn App() -> Element {
         if let Some(handle) = live_handle() {
             HostControl::service_global_frame(&handle.doc(), info.frame_count, |req, doc| {
                 HostControl::handle_action_click(req, doc, |d, nid| {
-                    dioxus_native::dispatch_synthetic_click(
+                    blitz_host::dispatch::dispatch_click(
                         d,
                         blitz_dom::NodeId::from_u64(nid),
                         keyboard_types::Modifiers::empty(),

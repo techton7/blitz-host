@@ -1,0 +1,9 @@
+# Local development patch for blitz-host workspace.
+[patch."https://github.com/techton7/blitz.git"]
+blitz-shell = { path = "../../blitz/packages/blitz-shell" }
+blitz-dom = { path = "../../blitz/packages/blitz-dom" }
+blitz-traits = { path = "../../blitz/packages/blitz-traits" }
+blitz-paint = { path = "../../blitz/packages/blitz-paint" }
+dioxus-native = { path = "../../blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "../../blitz/packages/dioxus-native-dom" }
+blitz-test-harness = { path = "../../blitz/packages/blitz-test-harness" }

@@ -16,6 +16,9 @@ pub use blitz_host_transport as transport;
 pub mod host;
 
 #[cfg(feature = "dioxus-native")]
+pub mod dispatch;
+
+#[cfg(feature = "dioxus-native")]
 pub mod dioxus;
 
 #[cfg(feature = "dioxus-native")]
