@@ -6716,10 +6716,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz-test-harness"
-version = "0.3.0-beta.4"
-
-[[patch.unused]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
 source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.2.6#e02ef2eba06bd5efcda6035456fcc84c9eed407a"
@@ -6738,3 +6734,7 @@ source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.2.6#e02e
 name = "blitz-traits"
 version = "0.3.0-beta.4"
 source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.2.6#e02ef2eba06bd5efcda6035456fcc84c9eed407a"
+
+[[patch.unused]]
+name = "blitz-test-harness"
+version = "0.3.0-beta.4"

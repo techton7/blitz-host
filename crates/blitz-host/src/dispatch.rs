@@ -352,9 +352,14 @@ pub fn dispatch_key(
     if let Some((dioxus_id, _)) = find_dioxus_target(doc, target_node_id)
         && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
     {
-        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
-        let dx_down = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
-        let dx_up = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        let platform_down = Rc::new(PlatformEventData::new(
+            dioxus_native::synthetic_keyboard_event(key_down.clone()),
+        ));
+        let platform_up = Rc::new(PlatformEventData::new(
+            dioxus_native::synthetic_keyboard_event(key_up.clone()),
+        ));
+        let dx_down = dioxus_core::Event::new(platform_down as Rc<dyn Any>, true);
+        let dx_up = dioxus_core::Event::new(platform_up as Rc<dyn Any>, true);
         runtime.handle_event("keydown", dx_down, dioxus_id);
         runtime.handle_event("keyup", dx_up, dioxus_id);
     }
