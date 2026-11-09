@@ -16,7 +16,7 @@ use blitz_traits::events::{
     MouseEventButtons, PointerCoords, UiEvent,
 };
 use dioxus_native::prelude::*;
-use ::keyboard_types::{Code, Key, Location, Modifiers};
+use ::keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
 
 /// Extract Dioxus [`dioxus_core::ElementId`] from node's "data-dioxus-id" attribute.
 pub fn get_dioxus_id(node: &Node) -> Option<dioxus_core::ElementId> {
@@ -25,7 +25,7 @@ pub fn get_dioxus_id(node: &Node) -> Option<dioxus_core::ElementId> {
         .iter()
         .find(|attr| *attr.name.local == *"data-dioxus-id")
         .and_then(|attr| attr.value.parse::<usize>().ok())
-        .map(dioxus_core::ElementId)
+        .map(dioxus_core::ElementId::from_raw)
 }
 
 /// Helper to find nearest Dioxus element ID and target NodeId for a given node
@@ -83,26 +83,26 @@ pub fn parse_key_str(raw: &str) -> (Key, Code, Modifiers) {
     }
 
     let (key, code) = if key_part.eq_ignore_ascii_case("tab") {
-        (Key::Tab, Code::Tab)
+        (Key::Named(NamedKey::Tab), Code::Tab)
     } else if key_part.eq_ignore_ascii_case("enter") || key_part.eq_ignore_ascii_case("return") {
-        (Key::Enter, Code::Enter)
+        (Key::Named(NamedKey::Enter), Code::Enter)
     } else if key_part.eq_ignore_ascii_case("space") || key_part == " " {
         (Key::Character(" ".into()), Code::Space)
     } else if key_part.eq_ignore_ascii_case("escape") || key_part.eq_ignore_ascii_case("esc") {
-        (Key::Escape, Code::Escape)
+        (Key::Named(NamedKey::Escape), Code::Escape)
     } else if key_part.eq_ignore_ascii_case("backspace") {
-        (Key::Backspace, Code::Backspace)
+        (Key::Named(NamedKey::Backspace), Code::Backspace)
     } else if key_part.eq_ignore_ascii_case("delete") || key_part.eq_ignore_ascii_case("del") {
-        (Key::Delete, Code::Delete)
+        (Key::Named(NamedKey::Delete), Code::Delete)
     } else if key_part.eq_ignore_ascii_case("arrowleft") || key_part.eq_ignore_ascii_case("left") {
-        (Key::ArrowLeft, Code::ArrowLeft)
+        (Key::Named(NamedKey::ArrowLeft), Code::ArrowLeft)
     } else if key_part.eq_ignore_ascii_case("arrowright") || key_part.eq_ignore_ascii_case("right")
     {
-        (Key::ArrowRight, Code::ArrowRight)
+        (Key::Named(NamedKey::ArrowRight), Code::ArrowRight)
     } else if key_part.eq_ignore_ascii_case("arrowup") || key_part.eq_ignore_ascii_case("up") {
-        (Key::ArrowUp, Code::ArrowUp)
+        (Key::Named(NamedKey::ArrowUp), Code::ArrowUp)
     } else if key_part.eq_ignore_ascii_case("arrowdown") || key_part.eq_ignore_ascii_case("down") {
-        (Key::ArrowDown, Code::ArrowDown)
+        (Key::Named(NamedKey::ArrowDown), Code::ArrowDown)
     } else if key_part.eq_ignore_ascii_case("a") {
         (Key::Character(key_part.to_string()), Code::KeyA)
     } else if key_part.eq_ignore_ascii_case("c") {
@@ -117,7 +117,7 @@ pub fn parse_key_str(raw: &str) -> (Key, Code, Modifiers) {
         (Key::Character(key_part.to_string()), Code::Unidentified)
     } else {
         (
-            Key::from_str(key_part).unwrap_or(Key::Unidentified),
+            Key::from_str(key_part).unwrap_or(Key::Named(NamedKey::Unidentified)),
             Code::from_str(key_part).unwrap_or(Code::Unidentified),
         )
     };
@@ -228,7 +228,7 @@ pub fn dispatch_key(
     };
 
     // 1. Handle Tab / Shift+Tab focus traversal
-    if key == Key::Tab {
+    if key == Key::Named(NamedKey::Tab) {
         let old_focus = doc.get_focussed_node_id();
         let new_focus = if combined_mods.contains(Modifiers::SHIFT) {
             doc.focus_prev_node()
@@ -267,7 +267,7 @@ pub fn dispatch_key(
     }
 
     // 2. Handle Escape focus clearing
-    if key == Key::Escape
+    if key == Key::Named(NamedKey::Escape)
         && let Some(old_id) = doc.get_focussed_node_id()
     {
         doc.clear_focus();
@@ -293,7 +293,7 @@ pub fn dispatch_key(
                     .iter()
                     .any(|a| &*a.name.local == "role" && a.value == "button")
         });
-    if is_button && (key == Key::Enter || key == Key::Character(" ".into())) {
+    if is_button && (key == Key::Named(NamedKey::Enter) || key == Key::Character(" ".into())) {
         dispatch_click(doc, target_node_id, combined_mods);
     }
 
@@ -663,18 +663,18 @@ mod tests {
     #[test]
     fn test_parse_key_str() {
         let (k, c, m) = parse_key_str("ctrl+shift+Tab");
-        assert_eq!(k, Key::Tab);
+        assert_eq!(k, Key::Named(NamedKey::Tab));
         assert_eq!(c, Code::Tab);
         assert!(m.contains(Modifiers::CONTROL));
         assert!(m.contains(Modifiers::SHIFT));
 
         let (k, c, m) = parse_key_str("cmd+Enter");
-        assert_eq!(k, Key::Enter);
+        assert_eq!(k, Key::Named(NamedKey::Enter));
         assert_eq!(c, Code::Enter);
         assert!(m.contains(Modifiers::META));
 
         let (k, c, m) = parse_key_str("Escape");
-        assert_eq!(k, Key::Escape);
+        assert_eq!(k, Key::Named(NamedKey::Escape));
         assert_eq!(c, Code::Escape);
         assert!(m.is_empty());
     }

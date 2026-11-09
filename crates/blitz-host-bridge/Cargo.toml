@@ -9,11 +9,11 @@ homepage.workspace = true
 description = "Runtime host bridge connecting live Blitz DOM and Winit to blitz-host"
 
 [dependencies]
-blitz-host-protocol = { version = "0.2.0", path = "../blitz-host-protocol" }
-blitz-host-transport = { version = "0.2.0", path = "../blitz-host-transport" }
-blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.6", default-features = false }
-blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.2.6", default-features = false }
-anyrender = "0.14.0"
-anyrender_vello_cpu = "0.18.0"
+blitz-host-protocol = { version = "0.3.0", path = "../blitz-host-protocol" }
+blitz-host-transport = { version = "0.3.0", path = "../blitz-host-transport" }
+blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.0", default-features = false }
+blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.0", default-features = false }
+anyrender = { git = "https://github.com/DioxusLabs/anyrender", branch = "main" }
+anyrender_vello_cpu = { git = "https://github.com/DioxusLabs/anyrender", branch = "main" }
 peniko = "0.6.0"
 png = "0.17"
