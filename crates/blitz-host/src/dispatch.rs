@@ -58,8 +58,16 @@ pub fn get_node_center_coords(doc: &BaseDocument, node_id: NodeId) -> Option<(f3
 
 /// Helper to map key string to (Key, Code, Modifiers).
 pub fn parse_key_str(raw: &str) -> (Key, Code, Modifiers) {
+    fn trim_preserving_space(s: &str) -> &str {
+        let t = s.trim();
+        if t.is_empty() && s.contains(' ') {
+            " "
+        } else {
+            t
+        }
+    }
     let mut mods = Modifiers::empty();
-    let mut key_part = raw.trim();
+    let mut key_part = trim_preserving_space(raw);
 
     while let Some(idx) = key_part.find('+') {
         let prefix = key_part[..idx].trim();
@@ -79,7 +87,7 @@ pub fn parse_key_str(raw: &str) -> (Key, Code, Modifiers) {
         {
             mods |= Modifiers::ALT;
         }
-        key_part = key_part[idx + 1..].trim();
+        key_part = trim_preserving_space(&key_part[idx + 1..]);
     }
 
     let (key, code) = if key_part.eq_ignore_ascii_case("tab") {
@@ -123,6 +131,128 @@ pub fn parse_key_str(raw: &str) -> (Key, Code, Modifiers) {
     };
 
     (key, code, mods)
+}
+
+fn attr_val<'a>(el: &'a blitz_dom::ElementData, name: &str) -> Option<&'a str> {
+    el.attrs()
+        .iter()
+        .find(|a| &*a.name.local == name)
+        .map(|a| a.value.as_ref())
+}
+
+fn has_attr_name(el: &blitz_dom::ElementData, name: &str) -> bool {
+    attr_val(el, name).is_some()
+}
+
+fn is_host_form_control_disabled(doc: &BaseDocument, node_id: NodeId) -> bool {
+    let Some(el) = doc.get_node(node_id).and_then(|n| n.element_data()) else {
+        return false;
+    };
+    if !matches!(&*el.name.local, "button" | "input" | "select" | "textarea") {
+        return false;
+    }
+    if has_attr_name(el, "disabled") {
+        return true;
+    }
+    let mut child_id = node_id;
+    while let Some(parent_id) = doc.get_node(child_id).and_then(|n| n.parent) {
+        let Some(parent) = doc.get_node(parent_id) else {
+            break;
+        };
+        if let Some(pel) = parent.element_data()
+            && &*pel.name.local == "fieldset"
+            && has_attr_name(pel, "disabled")
+        {
+            let first_legend_id = parent.children.iter().copied().find(|&cid| {
+                doc.get_node(cid)
+                    .and_then(|n| n.element_data())
+                    .is_some_and(|cel| &*cel.name.local == "legend")
+            });
+            if Some(child_id) != first_legend_id {
+                return true;
+            }
+        }
+        child_id = parent_id;
+    }
+    false
+}
+
+fn is_host_controlling_summary(doc: &BaseDocument, node_id: NodeId) -> bool {
+    let Some(node) = doc.get_node(node_id) else {
+        return false;
+    };
+    let Some(el) = node.element_data() else {
+        return false;
+    };
+    if &*el.name.local != "summary" {
+        return false;
+    }
+    let Some(parent_id) = node.parent else {
+        return false;
+    };
+    let Some(parent) = doc.get_node(parent_id) else {
+        return false;
+    };
+    parent
+        .element_data()
+        .is_some_and(|pel| &*pel.name.local == "details")
+        && parent.children.iter().copied().find(|&cid| {
+            doc.get_node(cid)
+                .and_then(|n| n.element_data())
+                .is_some_and(|cel| &*cel.name.local == "summary")
+        }) == Some(node_id)
+}
+
+fn is_host_keyboard_clickable_input(el: &blitz_dom::ElementData) -> bool {
+    &*el.name.local == "input"
+        && attr_val(el, "type").is_some_and(|t| {
+            t.eq_ignore_ascii_case("button")
+                || t.eq_ignore_ascii_case("submit")
+                || t.eq_ignore_ascii_case("reset")
+                || t.eq_ignore_ascii_case("image")
+                || t.eq_ignore_ascii_case("file")
+        })
+}
+
+fn should_dispatch_enter_click(doc: &BaseDocument, node_id: NodeId, mods: Modifiers) -> bool {
+    let Some(el) = doc.get_node(node_id).and_then(|n| n.element_data()) else {
+        return false;
+    };
+    if is_host_form_control_disabled(doc, node_id) {
+        return false;
+    }
+    let non_link_mods_ok =
+        !mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META);
+    match &*el.name.local {
+        "a" | "area" if has_attr_name(el, "href") => !mods.contains(Modifiers::ALT),
+        "button" => non_link_mods_ok,
+        "input" if is_host_keyboard_clickable_input(el) => non_link_mods_ok,
+        "summary" if is_host_controlling_summary(doc, node_id) => non_link_mods_ok,
+        _ => false,
+    }
+}
+
+fn should_dispatch_space_click(doc: &BaseDocument, node_id: NodeId, mods: Modifiers) -> bool {
+    if mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META | Modifiers::SHIFT) {
+        return false;
+    }
+    let Some(el) = doc.get_node(node_id).and_then(|n| n.element_data()) else {
+        return false;
+    };
+    if is_host_form_control_disabled(doc, node_id) {
+        return false;
+    }
+    match &*el.name.local {
+        "button" => true,
+        "input" => {
+            is_host_keyboard_clickable_input(el)
+                || attr_val(el, "type").is_some_and(|t| {
+                    t.eq_ignore_ascii_case("checkbox") || t.eq_ignore_ascii_case("radio")
+                })
+        }
+        "summary" => is_host_controlling_summary(doc, node_id),
+        _ => false,
+    }
 }
 
 /// Construct click event payload for a node.
@@ -282,22 +412,7 @@ pub fn dispatch_key(
         }
     }
 
-    // 3. Handle Enter / Space button activation
-    let is_button = doc
-        .get_node(target_node_id)
-        .and_then(|n| n.element_data())
-        .is_some_and(|el| {
-            &*el.name.local == "button"
-                || el
-                    .attrs()
-                    .iter()
-                    .any(|a| &*a.name.local == "role" && a.value == "button")
-        });
-    if is_button && (key == Key::Named(NamedKey::Enter) || key == Key::Character(" ".into())) {
-        dispatch_click(doc, target_node_id, combined_mods);
-    }
-
-    // 4. Construct BlitzKeyEvent for KeyDown and KeyUp
+    // 3. Construct BlitzKeyEvent for KeyDown and KeyUp
     let text_payload = match &key {
         Key::Character(s) => Some(SmolStr::new(s)),
         _ => None,
@@ -325,43 +440,82 @@ pub fn dispatch_key(
         text: None,
     };
 
-    // 5. Dispatch UI events to BaseDocument
-    doc.handle_ui_event(UiEvent::KeyDown(key_down.clone()));
-    doc.handle_ui_event(UiEvent::KeyUp(key_up.clone()));
-
-    // 6. If target node is a text input, propagate updated value to Dioxus listeners
-    if let Some(node) = doc.get_node(target_node_id)
-        && let Some(el) = node.element_data()
-        && let Some(input_data) = el.text_input_data()
-    {
-        let current_val = input_data.editor.raw_text().to_string();
-        let event_data = dioxus_native::synthetic_form_event(current_val, vec![]);
-        let platform_event = Rc::new(PlatformEventData::new(event_data));
-        let dx_input = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
-        let dx_change = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-
-        if let Some(dioxus_id) = get_dioxus_id(node)
-            && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
-        {
-            runtime.handle_event("input", dx_input, dioxus_id);
-            runtime.handle_event("change", dx_change, dioxus_id);
-        }
-    }
-
-    // 7. Dispatch Dioxus KeyDown and KeyUp events
+    // 4. Dispatch Dioxus KeyDown FIRST so `evt.prevent_default()` cancels engine & synthetic click actions
+    let mut keydown_cancelled = false;
     if let Some((dioxus_id, _)) = find_dioxus_target(doc, target_node_id)
         && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
     {
         let platform_down = Rc::new(PlatformEventData::new(
             dioxus_native::synthetic_keyboard_event(key_down.clone()),
         ));
+        let dx_down = dioxus_core::Event::new(platform_down as Rc<dyn Any>, true);
+        runtime.handle_event("keydown", dx_down.clone(), dioxus_id);
+        keydown_cancelled = !dx_down.default_action_enabled();
+    }
+
+    let is_space = matches!(&key, Key::Character(s) if s == " ");
+    let mut space_armed = false;
+
+    // 5. Run KeyDown default action when not cancelled
+    if !keydown_cancelled {
+        doc.handle_ui_event(UiEvent::KeyDown(key_down));
+
+        // If target node is a text input, propagate updated value to Dioxus listeners
+        if let Some(node) = doc.get_node(target_node_id)
+            && let Some(el) = node.element_data()
+            && let Some(input_data) = el.text_input_data()
+        {
+            let current_val = input_data.editor.raw_text().to_string();
+            let event_data = dioxus_native::synthetic_form_event(current_val, vec![]);
+            let platform_event = Rc::new(PlatformEventData::new(event_data));
+            let dx_input = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
+            let dx_change = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+
+            if let Some(dioxus_id) = get_dioxus_id(node)
+                && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
+            {
+                runtime.handle_event("input", dx_input, dioxus_id);
+                runtime.handle_event("change", dx_change, dioxus_id);
+            }
+        }
+
+        if key == Key::Named(NamedKey::Enter)
+            && doc.get_focussed_node_id() == Some(target_node_id)
+            && should_dispatch_enter_click(doc, target_node_id, combined_mods)
+        {
+            dispatch_click(doc, target_node_id, combined_mods);
+        } else if is_space
+            && doc.get_focussed_node_id() == Some(target_node_id)
+            && should_dispatch_space_click(doc, target_node_id, combined_mods)
+        {
+            space_armed = true;
+        }
+    }
+
+    // 6. Dispatch Dioxus KeyUp event
+    let mut keyup_cancelled = false;
+    let keyup_target_id = doc.get_focussed_node_id().unwrap_or(target_node_id);
+    if let Some((dioxus_id, _)) = find_dioxus_target(doc, keyup_target_id)
+        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
+    {
         let platform_up = Rc::new(PlatformEventData::new(
             dioxus_native::synthetic_keyboard_event(key_up.clone()),
         ));
-        let dx_down = dioxus_core::Event::new(platform_down as Rc<dyn Any>, true);
         let dx_up = dioxus_core::Event::new(platform_up as Rc<dyn Any>, true);
-        runtime.handle_event("keydown", dx_down, dioxus_id);
-        runtime.handle_event("keyup", dx_up, dioxus_id);
+        runtime.handle_event("keyup", dx_up.clone(), dioxus_id);
+        keyup_cancelled = !dx_up.default_action_enabled();
+    }
+
+    // 7. Run KeyUp default action when neither KeyDown nor KeyUp was cancelled
+    if !keydown_cancelled && !keyup_cancelled {
+        doc.handle_ui_event(UiEvent::KeyUp(key_up));
+
+        if space_armed
+            && doc.get_focussed_node_id() == Some(target_node_id)
+            && should_dispatch_space_click(doc, target_node_id, combined_mods)
+        {
+            dispatch_click(doc, target_node_id, combined_mods);
+        }
     }
 
     Ok(target_node_id)
@@ -677,5 +831,153 @@ mod tests {
         assert_eq!(k, Key::Named(NamedKey::Escape));
         assert_eq!(c, Code::Escape);
         assert!(m.is_empty());
+
+        let (k, c, m) = parse_key_str(" ");
+        assert_eq!(k, Key::Character(" ".into()));
+        assert_eq!(c, Code::Space);
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn dispatch_key_html_activation_and_prevent_default_contract() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static BTN_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static PREVENTED_KEYDOWN: AtomicUsize = AtomicUsize::new(0);
+        static PREVENTED_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static ROLE_BTN_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static CHECKBOX_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static LINK_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static FS_BLOCKED_CLICKS: AtomicUsize = AtomicUsize::new(0);
+        static FS_LEGEND_CLICKS: AtomicUsize = AtomicUsize::new(0);
+
+        BTN_CLICKS.store(0, Ordering::SeqCst);
+        PREVENTED_KEYDOWN.store(0, Ordering::SeqCst);
+        PREVENTED_CLICKS.store(0, Ordering::SeqCst);
+        ROLE_BTN_CLICKS.store(0, Ordering::SeqCst);
+        CHECKBOX_CLICKS.store(0, Ordering::SeqCst);
+        LINK_CLICKS.store(0, Ordering::SeqCst);
+        FS_BLOCKED_CLICKS.store(0, Ordering::SeqCst);
+        FS_LEGEND_CLICKS.store(0, Ordering::SeqCst);
+
+        #[component]
+        fn TestApp() -> Element {
+            rsx! {
+                div {
+                    button {
+                        id: "plain-btn",
+                        onclick: move |_| { BTN_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                        "Plain"
+                    }
+                    button {
+                        id: "prevent-btn",
+                        onkeydown: move |evt| {
+                            if evt.key() == Key::Named(NamedKey::Enter)
+                                || evt.key() == Key::Character(" ".into())
+                            {
+                                evt.prevent_default();
+                                PREVENTED_KEYDOWN.fetch_add(1, Ordering::SeqCst);
+                            }
+                        },
+                        onclick: move |_| { PREVENTED_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                        "Pattern B"
+                    }
+                    div {
+                        id: "role-btn",
+                        role: "button",
+                        tabindex: "0",
+                        onclick: move |_| { ROLE_BTN_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                        "ARIA pseudo-button"
+                    }
+                    input {
+                        id: "chk",
+                        r#type: "checkbox",
+                        onclick: move |_| { CHECKBOX_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                    }
+                    a {
+                        id: "lnk",
+                        href: "#target",
+                        onclick: move |_| { LINK_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                        "Link"
+                    }
+                    fieldset {
+                        disabled: true,
+                        legend {
+                            button {
+                                id: "legend-btn",
+                                onclick: move |_| { FS_LEGEND_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                                "Legend Button"
+                            }
+                        }
+                        button {
+                            id: "blocked-btn",
+                            onclick: move |_| { FS_BLOCKED_CLICKS.fetch_add(1, Ordering::SeqCst); },
+                            "Blocked Button"
+                        }
+                    }
+                }
+            }
+        }
+
+        let vdom = dioxus_core::VirtualDom::new(TestApp);
+        let mut dx_doc =
+            dioxus_native::DioxusDocument::new(vdom, blitz_dom::DocumentConfig::default());
+        dx_doc.initial_build();
+        dx_doc.inner_mut().resolve(0.0);
+
+        let find_id = |doc: &dioxus_native::DioxusDocument, sel: &str| -> NodeId {
+            doc.inner().query_selector(sel).unwrap().expect(sel)
+        };
+
+        let plain_btn = find_id(&dx_doc, "#plain-btn");
+        let prevent_btn = find_id(&dx_doc, "#prevent-btn");
+        let role_btn = find_id(&dx_doc, "#role-btn");
+        let chk = find_id(&dx_doc, "#chk");
+        let lnk = find_id(&dx_doc, "#lnk");
+        let legend_btn = find_id(&dx_doc, "#legend-btn");
+        let blocked_btn = find_id(&dx_doc, "#blocked-btn");
+
+        let send_key = |dx_doc: &mut dioxus_native::DioxusDocument, id: NodeId, key: &str| {
+            let runtime = dx_doc.vdom.runtime();
+            let _guard = dioxus_core::RuntimeGuard::new(Rc::clone(&runtime));
+            let mut inner = dx_doc.inner_mut();
+            dispatch_key(&mut inner, Some(id), key, Modifiers::empty()).unwrap();
+        };
+
+        // 1. Plain <button>: Enter and Space each fire onclick once
+        send_key(&mut dx_doc, plain_btn, "Enter");
+        assert_eq!(BTN_CLICKS.load(Ordering::SeqCst), 1);
+        send_key(&mut dx_doc, plain_btn, " ");
+        assert_eq!(BTN_CLICKS.load(Ordering::SeqCst), 2);
+
+        // 2. Pattern B <button> calling evt.prevent_default(): onkeydown runs, onclick NEVER double-fires
+        send_key(&mut dx_doc, prevent_btn, "Enter");
+        send_key(&mut dx_doc, prevent_btn, " ");
+        assert_eq!(PREVENTED_KEYDOWN.load(Ordering::SeqCst), 2);
+        assert_eq!(PREVENTED_CLICKS.load(Ordering::SeqCst), 0);
+
+        // 3. <div role="button"> is NOT auto-clicked by host layer
+        send_key(&mut dx_doc, role_btn, "Enter");
+        send_key(&mut dx_doc, role_btn, " ");
+        assert_eq!(ROLE_BTN_CLICKS.load(Ordering::SeqCst), 0);
+
+        // 4. <input type="checkbox">: Space clicks, Enter does NOT
+        send_key(&mut dx_doc, chk, "Enter");
+        assert_eq!(CHECKBOX_CLICKS.load(Ordering::SeqCst), 0);
+        send_key(&mut dx_doc, chk, " ");
+        assert_eq!(CHECKBOX_CLICKS.load(Ordering::SeqCst), 1);
+
+        // 5. <a href>: Enter clicks, Space does NOT
+        send_key(&mut dx_doc, lnk, " ");
+        assert_eq!(LINK_CLICKS.load(Ordering::SeqCst), 0);
+        send_key(&mut dx_doc, lnk, "Enter");
+        assert_eq!(LINK_CLICKS.load(Ordering::SeqCst), 1);
+
+        // 6. <fieldset disabled>: first-<legend> descendant allowed, body descendant blocked
+        send_key(&mut dx_doc, blocked_btn, "Enter");
+        send_key(&mut dx_doc, blocked_btn, " ");
+        assert_eq!(FS_BLOCKED_CLICKS.load(Ordering::SeqCst), 0);
+        send_key(&mut dx_doc, legend_btn, "Enter");
+        assert_eq!(FS_LEGEND_CLICKS.load(Ordering::SeqCst), 1);
     }
 }
