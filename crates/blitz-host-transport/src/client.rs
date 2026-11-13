@@ -206,6 +206,7 @@ impl DebugClient {
             node_id: Some(node_id),
             selector: None,
             target: Some(ElementTarget::Id(node_id)),
+            focus_visible: None,
         })
     }
 
@@ -220,6 +221,16 @@ impl DebugClient {
         window_id: Option<u64>,
         target: impl Into<ElementTarget>,
     ) -> io::Result<ActionResponse> {
+        self.focus_target_with_options(window_id, target, None)
+    }
+
+    /// Focus an element specified by node ID or CSS selector on a targeted window with an optional `focusVisible` override.
+    pub fn focus_target_with_options(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+        focus_visible: Option<bool>,
+    ) -> io::Result<ActionResponse> {
         let target = target.into();
         let (node_id, selector) = match &target {
             ElementTarget::Id(id) => (Some(*id), None),
@@ -230,6 +241,7 @@ impl DebugClient {
             node_id,
             selector,
             target: Some(target),
+            focus_visible,
         })
     }
 

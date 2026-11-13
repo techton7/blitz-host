@@ -39,6 +39,7 @@ mod tests {
                         node_count: 1,
                         current_frame: Some(10),
                         focused_node_id: None,
+                        focused_visible: None,
                         hover_node_id: None,
                         viewport_scroll: None,
                         nodes: vec![SemanticNode {
@@ -50,6 +51,7 @@ mod tests {
                             text: Some("Click Me".into()),
                             bounds: Some([10.0, 20.0, 100.0, 40.0]),
                             focused: None,
+                            focus_visible: None,
                             hovered: None,
                             active: None,
                             scroll_offset: None,

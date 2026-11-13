@@ -82,27 +82,28 @@ pub fn BlitzHost(children: Element) -> Element {
             frame_counter.set(frame);
 
             if let Some(handle) = handle_for_event.borrow().as_ref() {
-                let mut doc = handle.doc_mut();
+                let doc_rc = handle.base_document();
                 let result =
-                    HostControl::service_global_frame(&mut doc, frame, |action_req, base_doc| {
-                        HostControl::handle_action(
+                    HostControl::service_global_frame_rc(&doc_rc, frame, |action_req, doc_rc| {
+                        HostControl::handle_action_rc(
                             action_req,
-                            base_doc,
+                            doc_rc,
                             |d, nid| {
-                                crate::dispatch::dispatch_click(
+                                crate::dispatch::dispatch_click_rc(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
                                     keyboard_types::Modifiers::empty(),
                                 )
                             },
-                            |d, nid| {
-                                crate::dispatch::dispatch_focus(
+                            |d, nid, focus_visible| {
+                                crate::dispatch::dispatch_focus_rc(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
+                                    focus_visible,
                                 )
                             },
                             |d, nid, val| {
-                                crate::dispatch::dispatch_input(
+                                crate::dispatch::dispatch_input_rc(
                                     d,
                                     blitz_dom::NodeId::from_u64(nid),
                                     val,
@@ -124,7 +125,7 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                crate::dispatch::dispatch_key(
+                                crate::dispatch::dispatch_key_rc(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     key,
@@ -148,7 +149,7 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                crate::dispatch::dispatch_pointer_move(
+                                crate::dispatch::dispatch_pointer_move_rc(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -181,7 +182,7 @@ pub fn BlitzHost(children: Element) -> Element {
                                     }
                                     _ => crate::dispatch::MouseEventButton::Main,
                                 };
-                                crate::dispatch::dispatch_pointer_down(
+                                crate::dispatch::dispatch_pointer_down_rc(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -215,7 +216,7 @@ pub fn BlitzHost(children: Element) -> Element {
                                     }
                                     _ => crate::dispatch::MouseEventButton::Main,
                                 };
-                                crate::dispatch::dispatch_pointer_up(
+                                crate::dispatch::dispatch_pointer_up_rc(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,
@@ -240,7 +241,7 @@ pub fn BlitzHost(children: Element) -> Element {
                                         kb_mods |= keyboard_types::Modifiers::META;
                                     }
                                 }
-                                crate::dispatch::dispatch_wheel(
+                                crate::dispatch::dispatch_wheel_rc(
                                     d,
                                     nid.map(blitz_dom::NodeId::from_u64),
                                     coords,

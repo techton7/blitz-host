@@ -14,12 +14,14 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         Ok(Some(id)) => NodeId::from_u64(id),
         Ok(None) => doc.root_node().id,
         Err(err) => {
+            let focused_id = doc.get_focussed_node_id();
             return InspectResponse {
                 document_id,
                 root_id: 0,
                 node_count: 0,
                 current_frame: None,
-                focused_node_id: doc.get_focussed_node_id().map(|id| id.as_u64()),
+                focused_node_id: focused_id.map(|id| id.as_u64()),
+                focused_visible: focused_id.map(|id| doc.is_focus_visible(id)),
                 hover_node_id: doc.get_hover_node_id().map(|id| id.as_u64()),
                 viewport_scroll: None,
                 nodes: Vec::new(),
@@ -82,6 +84,11 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
 
         let is_focused = doc.get_focussed_node_id() == Some(node_id);
         let focused = if is_focused { Some(true) } else { None };
+        let focus_visible = if is_focused {
+            Some(doc.is_focus_visible(node_id))
+        } else {
+            None
+        };
         let hovered = if node.is_hovered() { Some(true) } else { None };
         let active = if node.is_active() { Some(true) } else { None };
         let scroll_offset = match &node.data {
@@ -112,6 +119,7 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
             text,
             bounds,
             focused,
+            focus_visible,
             hovered,
             active,
             scroll_offset,
@@ -126,12 +134,14 @@ pub fn inspect_document(doc: &BaseDocument, request: InspectRequest) -> InspectR
         None
     };
 
+    let focused_id = doc.get_focussed_node_id();
     InspectResponse {
         document_id,
         root_id: root_id.as_u64(),
         node_count: nodes.len(),
         current_frame: None,
-        focused_node_id: doc.get_focussed_node_id().map(|id| id.as_u64()),
+        focused_node_id: focused_id.map(|id| id.as_u64()),
+        focused_visible: focused_id.map(|id| doc.is_focus_visible(id)),
         hover_node_id: doc.get_hover_node_id().map(|id| id.as_u64()),
         viewport_scroll,
         nodes,

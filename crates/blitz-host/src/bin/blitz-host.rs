@@ -1447,10 +1447,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let mut positional = Vec::new();
+            let mut focus_visible_opt: Option<bool> = None;
             let mut skip_next = false;
-            for arg in subargs {
+            for i in 0..subargs.len() {
+                let arg = &subargs[i];
                 if skip_next {
                     skip_next = false;
+                    continue;
+                }
+                if arg == "--focus-visible" {
+                    if let Some(next) = subargs.get(i + 1)
+                        && (next.eq_ignore_ascii_case("true") || next.eq_ignore_ascii_case("false"))
+                    {
+                        focus_visible_opt = next.parse::<bool>().ok();
+                        skip_next = true;
+                    } else {
+                        focus_visible_opt = Some(true);
+                    }
+                    continue;
+                }
+                if arg == "--no-focus-visible" {
+                    focus_visible_opt = Some(false);
+                    continue;
+                }
+                if let Some(rest) = arg.strip_prefix("--focus-visible=") {
+                    focus_visible_opt = rest.parse::<bool>().ok();
                     continue;
                 }
                 if arg == "--pid"
@@ -1505,7 +1526,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 target,
                 client.descriptor().pid
             );
-            let act_res = client.focus_target_window(window_id, target)?;
+            let act_res = client.focus_target_with_options(window_id, target, focus_visible_opt)?;
             let _settle_res = client.settle_window(window_id, 2)?;
             println!("{}", serde_json::to_string_pretty(&act_res)?);
             if !act_res.success {

@@ -54,6 +54,7 @@ fn test_live_cli_attach_and_inspect_named_pipe() {
                         node_count: 2,
                         current_frame: Some(1),
                         focused_node_id: None,
+                        focused_visible: None,
                         hover_node_id: None,
                         viewport_scroll: None,
                         nodes: vec![
@@ -66,6 +67,7 @@ fn test_live_cli_attach_and_inspect_named_pipe() {
                                 text: None,
                                 bounds: Some([0.0, 0.0, 800.0, 600.0]),
                                 focused: None,
+                                focus_visible: None,
                                 hovered: None,
                                 active: None,
                                 scroll_offset: None,
@@ -80,6 +82,7 @@ fn test_live_cli_attach_and_inspect_named_pipe() {
                                 text: Some("Submit".into()),
                                 bounds: Some([50.0, 50.0, 120.0, 40.0]),
                                 focused: None,
+                                focus_visible: None,
                                 hovered: None,
                                 active: None,
                                 scroll_offset: None,

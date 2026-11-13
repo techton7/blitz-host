@@ -136,4 +136,86 @@ impl HostBridge {
             needs_redraw,
         }
     }
+
+    /// Non-blocking check for pending requests backed by an `Rc<RefCell<BaseDocument>>`,
+    /// releasing any `RefCell` borrow before invoking `dispatch_action` so Dioxus event handlers
+    /// (`set_pointer_capture`, `focus_with_options`, etc.) can safely borrow the live document.
+    pub fn poll_and_service_rc_with(
+        &mut self,
+        doc_rc: &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        current_frame: u64,
+        mut dispatch_action: impl FnMut(
+            &ActionRequest,
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        ) -> Result<ActionResponse, String>,
+    ) -> ServiceResult {
+        let mut responded = 0;
+        let mut needs_redraw = false;
+
+        let mut remaining_settles = Vec::with_capacity(self.pending_settles.len());
+        for settle in self.pending_settles.drain(..) {
+            if current_frame >= settle.target_frame {
+                settle
+                    .bridge_req
+                    .respond(ControlResponse::SettleSuccess(SettleResponse {
+                        settled: true,
+                        frames_waited: settle.requested_frames,
+                        current_frame,
+                    }));
+                responded += 1;
+            } else {
+                remaining_settles.push(settle);
+            }
+        }
+        self.pending_settles = remaining_settles;
+        if !self.pending_settles.is_empty() {
+            needs_redraw = true;
+        }
+
+        while let Ok(bridge_req) = self.receiver.try_recv() {
+            match &bridge_req.request {
+                ControlRequest::Inspect(inspect_req) => {
+                    let mut response = {
+                        let doc = doc_rc.borrow();
+                        inspect_document(&doc, inspect_req.clone())
+                    };
+                    response.current_frame = Some(current_frame);
+                    bridge_req.respond(ControlResponse::InspectSuccess(response));
+                    responded += 1;
+                }
+                ControlRequest::Act(action_req) => {
+                    let resp = match dispatch_action(action_req, doc_rc) {
+                        Ok(act_resp) => ControlResponse::ActionSuccess(act_resp),
+                        Err(err_msg) => ControlResponse::Error(err_msg),
+                    };
+                    bridge_req.respond(resp);
+                    responded += 1;
+                    needs_redraw = true;
+                }
+                ControlRequest::Settle(settle_req) => {
+                    let requested_frames = settle_req.frames.max(1);
+                    self.pending_settles.push(PendingSettle {
+                        bridge_req,
+                        target_frame: current_frame + requested_frames as u64,
+                        requested_frames,
+                    });
+                    needs_redraw = true;
+                }
+                ControlRequest::Capture(capture_req) => {
+                    let response = {
+                        let mut doc = doc_rc.borrow_mut();
+                        crate::capture::capture_document(&mut doc, capture_req.clone())
+                    };
+                    bridge_req.respond(ControlResponse::CaptureSuccess(response));
+                    responded += 1;
+                }
+            }
+        }
+
+        ServiceResult {
+            responded,
+            pending_settles: self.pending_settles.len(),
+            needs_redraw,
+        }
+    }
 }

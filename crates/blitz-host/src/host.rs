@@ -186,6 +186,298 @@ impl HostControl {
         ServiceResult::default()
     }
 
+    /// Polls and services pending control requests against an `Rc<RefCell<BaseDocument>>` without
+    /// holding a `RefMut` borrow across action dispatch.
+    pub fn poll_and_service_rc<F>(
+        &mut self,
+        doc_rc: &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        current_frame: u64,
+        dispatch_action: F,
+    ) -> ServiceResult
+    where
+        F: FnMut(
+            &ActionRequest,
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        ) -> Result<ActionResponse, String>,
+    {
+        if self.server.descriptor().primary_document_id.is_none() {
+            let win_id = self.server.descriptor().primary_window_id;
+            let doc_id = doc_rc.borrow().id();
+            let _ = self.server.update_primary_window(win_id, Some(doc_id));
+        }
+        self.bridge
+            .poll_and_service_rc_with(doc_rc, current_frame, dispatch_action)
+    }
+
+    /// Services the process-global HostControl instance on the UI thread using an `Rc<RefCell<BaseDocument>>`.
+    pub fn service_global_frame_rc<F>(
+        doc_rc: &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        current_frame: u64,
+        dispatch_action: F,
+    ) -> ServiceResult
+    where
+        F: FnMut(
+            &ActionRequest,
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        ) -> Result<ActionResponse, String>,
+    {
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
+            if let Some(ctrl) = guard.as_mut() {
+                return ctrl.poll_and_service_rc(doc_rc, current_frame, dispatch_action);
+            }
+        }
+        ServiceResult::default()
+    }
+
+    /// Dispatches UI actions against an `Rc<RefCell<BaseDocument>>`, releasing document borrows before running action callbacks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_action_rc<C, F, S, K, M, MD, MU, W>(
+        action_req: &ActionRequest,
+        doc_rc: &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+        mut click_fn: C,
+        mut focus_fn: F,
+        mut set_value_fn: S,
+        mut key_fn: K,
+        mut mouse_move_fn: M,
+        mut mouse_down_fn: MD,
+        mut mouse_up_fn: MU,
+        mut wheel_fn: W,
+    ) -> Result<ActionResponse, String>
+    where
+        C: FnMut(&std::rc::Rc<std::cell::RefCell<BaseDocument>>, u64) -> bool,
+        F: FnMut(&std::rc::Rc<std::cell::RefCell<BaseDocument>>, u64, Option<bool>) -> bool,
+        S: FnMut(&std::rc::Rc<std::cell::RefCell<BaseDocument>>, u64, &str) -> bool,
+        K: FnMut(
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+            Option<u64>,
+            &str,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        M: FnMut(
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        MD: FnMut(
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<&str>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        MU: FnMut(
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+            Option<u64>,
+            Option<(f32, f32)>,
+            Option<&str>,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+        W: FnMut(
+            &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
+            Option<u64>,
+            Option<(f32, f32)>,
+            f64,
+            f64,
+            Option<blitz_host_protocol::KeyModifiers>,
+        ) -> Result<u64, String>,
+    {
+        let resolved_target = {
+            let base_doc = doc_rc.borrow();
+            resolve_target_in_doc(
+                &base_doc,
+                action_req.target().as_ref(),
+                action_req.raw_node_id(),
+                action_req.raw_selector(),
+            )?
+        };
+
+        match action_req {
+            ActionRequest::Click { .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "Click requires a target node or selector".to_string())?;
+                {
+                    let base_doc = doc_rc.borrow();
+                    let _ = base_doc
+                        .get_node(blitz_dom::NodeId::from_u64(node_id))
+                        .ok_or_else(|| format!("Node #{node_id} not found in document"))?;
+                }
+                let handled = click_fn(doc_rc, node_id);
+                Ok(ActionResponse {
+                    success: true,
+                    node_id,
+                    handled: Some(handled),
+                    message: Some(if handled {
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (handled by listener)"
+                        )
+                    } else {
+                        format!(
+                            "Dispatched synthetic click to node #{node_id} (unhandled, background click)"
+                        )
+                    }),
+                })
+            }
+            ActionRequest::Focus { focus_visible, .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "Focus requires a target node or selector".to_string())?;
+                {
+                    let base_doc = doc_rc.borrow();
+                    let _ = base_doc
+                        .get_node(blitz_dom::NodeId::from_u64(node_id))
+                        .ok_or_else(|| format!("Node #{node_id} not found in document"))?;
+                }
+                if focus_fn(doc_rc, node_id, *focus_visible) {
+                    Ok(ActionResponse {
+                        success: true,
+                        node_id,
+                        handled: Some(true),
+                        message: Some(format!("Dispatched synthetic focus to node #{node_id}")),
+                    })
+                } else {
+                    Err(format!("Node #{node_id} not found or not focusable"))
+                }
+            }
+            ActionRequest::SetValue { value, .. } => {
+                let node_id = resolved_target
+                    .ok_or_else(|| "SetValue requires a target node or selector".to_string())?;
+                if set_value_fn(doc_rc, node_id, value) {
+                    Ok(ActionResponse {
+                        success: true,
+                        node_id,
+                        handled: None,
+                        message: Some(format!("Set value on node #{node_id}")),
+                    })
+                } else {
+                    Err(format!(
+                        "Node #{node_id} not found or not an editable target"
+                    ))
+                }
+            }
+            ActionRequest::Key { key, modifiers, .. } => {
+                match key_fn(doc_rc, resolved_target, key, *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        handled: None,
+                        message: Some(format!(
+                            "Dispatched synthetic key '{key}' to node #{target_nid}"
+                        )),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch key '{key}': {e}")),
+                }
+            }
+            ActionRequest::MouseMove {
+                x, y, modifiers, ..
+            } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_move_fn(doc_rc, resolved_target, coords, *modifiers) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        handled: None,
+                        message: Some(format!(
+                            "Dispatched synthetic mouse move to node #{target_nid}"
+                        )),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse move: {e}")),
+                }
+            }
+            ActionRequest::MouseDown {
+                x,
+                y,
+                button,
+                modifiers,
+                ..
+            } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_down_fn(
+                    doc_rc,
+                    resolved_target,
+                    coords,
+                    button.as_deref(),
+                    *modifiers,
+                ) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        handled: None,
+                        message: Some(format!(
+                            "Dispatched synthetic mouse down to node #{target_nid}"
+                        )),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse down: {e}")),
+                }
+            }
+            ActionRequest::MouseUp {
+                x,
+                y,
+                button,
+                modifiers,
+                ..
+            } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match mouse_up_fn(
+                    doc_rc,
+                    resolved_target,
+                    coords,
+                    button.as_deref(),
+                    *modifiers,
+                ) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        handled: None,
+                        message: Some(format!(
+                            "Dispatched synthetic mouse up to node #{target_nid}"
+                        )),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch mouse up: {e}")),
+                }
+            }
+            ActionRequest::Wheel {
+                x,
+                y,
+                delta_x,
+                delta_y,
+                modifiers,
+                ..
+            } => {
+                let coords = match (*x, *y) {
+                    (Some(cx), Some(cy)) => Some((cx, cy)),
+                    _ => None,
+                };
+                match wheel_fn(
+                    doc_rc,
+                    resolved_target,
+                    coords,
+                    *delta_x,
+                    *delta_y,
+                    *modifiers,
+                ) {
+                    Ok(target_nid) => Ok(ActionResponse {
+                        success: true,
+                        node_id: target_nid,
+                        handled: None,
+                        message: Some(format!(
+                            "Dispatched synthetic wheel ({delta_x}, {delta_y}) to node #{target_nid}"
+                        )),
+                    }),
+                    Err(e) => Err(format!("Failed to dispatch wheel: {e}")),
+                }
+            }
+        }
+    }
+
     /// Dispatches UI actions (Click, Focus, SetValue, Key, MouseMove, MouseDown, MouseUp, Wheel) using provided closures.
     pub fn handle_action<C, F, S, K, M, MD, MU, W>(
         action_req: &ActionRequest,

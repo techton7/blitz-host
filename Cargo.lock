@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "blitz-dom",
  "blitz-host-bridge",
@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-bridge"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-protocol"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -471,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-transport"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "blitz-host-protocol",
  "interprocess",
@@ -7133,25 +7133,25 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "blitz-test-harness"
+version = "0.3.0-beta.4"
+
+[[patch.unused]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.0#25592758f8c7af637b0dfafbffe10a3d0077de4f"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.3#62eb72b9e158cee97b8f8668fab9b241c4985a35"
 
 [[patch.unused]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.0#25592758f8c7af637b0dfafbffe10a3d0077de4f"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.3#62eb72b9e158cee97b8f8668fab9b241c4985a35"
 
 [[patch.unused]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.0#25592758f8c7af637b0dfafbffe10a3d0077de4f"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.3#62eb72b9e158cee97b8f8668fab9b241c4985a35"
 
 [[patch.unused]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.0#25592758f8c7af637b0dfafbffe10a3d0077de4f"
-
-[[patch.unused]]
-name = "blitz-test-harness"
-version = "0.3.0-beta.4"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.3#62eb72b9e158cee97b8f8668fab9b241c4985a35"

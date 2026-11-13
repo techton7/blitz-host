@@ -50,6 +50,7 @@ mod tests {
                 node_id: Some(root_id.as_u64()),
                 selector: None,
                 target: None,
+                focus_visible: None,
             }),
             reply: focus_resp_tx,
         })
@@ -249,6 +250,7 @@ mod tests {
                 node_id: Some(root_id.as_u64()),
                 selector: None,
                 target: None,
+                focus_visible: None,
             }),
             reply: act_resp_tx,
         })
@@ -302,5 +304,74 @@ mod tests {
 
         let resp = inspect_resp_rx.recv().unwrap();
         assert!(matches!(resp, ControlResponse::InspectSuccess(_)));
+    }
+
+    #[test]
+    fn test_inspect_document_reports_focus_visible_modality() {
+        use blitz_dom::{Attribute, FocusOptions, FocusSource, QualName, local_name, ns};
+
+        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let root_id = doc.root_node().id;
+        let btn_id = {
+            let mut mutator = doc.mutate();
+            let btn = mutator.create_element(
+                QualName::new(None, ns!(html), local_name!("button")),
+                vec![Attribute {
+                    name: QualName::new(None, ns!(), local_name!("id")),
+                    value: "trigger-btn".to_string(),
+                }],
+            );
+            mutator.append_children(root_id, &[btn]);
+            btn
+        };
+        doc.resolve(0.0);
+
+        // 1. Keyboard focus on <button>: focused = Some(true), focus_visible = Some(true)
+        assert!(doc.set_focus_to_with_source(btn_id, FocusSource::Keyboard));
+        let snap_kb = inspect_document(&doc, InspectRequest::default());
+        assert_eq!(snap_kb.focused_node_id, Some(btn_id.as_u64()));
+        assert_eq!(snap_kb.focused_visible, Some(true));
+        let btn_kb = snap_kb
+            .nodes
+            .iter()
+            .find(|n| n.id == btn_id.as_u64())
+            .expect("trigger-btn must exist");
+        assert_eq!(btn_kb.focused, Some(true));
+        assert_eq!(btn_kb.focus_visible, Some(true));
+
+        // 2. Pointer focus on <button>: focused = Some(true), focus_visible = Some(false)
+        doc.clear_focus();
+        assert!(doc.set_focus_to_with_source(btn_id, FocusSource::Pointer));
+        let snap_ptr = inspect_document(&doc, InspectRequest::default());
+        assert_eq!(snap_ptr.focused_node_id, Some(btn_id.as_u64()));
+        assert_eq!(snap_ptr.focused_visible, Some(false));
+        let btn_ptr = snap_ptr
+            .nodes
+            .iter()
+            .find(|n| n.id == btn_id.as_u64())
+            .expect("trigger-btn must exist");
+        assert_eq!(btn_ptr.focused, Some(true));
+        assert_eq!(btn_ptr.focus_visible, Some(false));
+
+        // 3. Explicit FocusOptions { focus_visible: Some(false) } overrides keyboard modality
+        doc.clear_focus();
+        assert!(doc.set_focus_to_with_source(btn_id, FocusSource::Keyboard));
+        doc.clear_focus();
+        assert!(doc.set_focus_to_with_options(
+            btn_id,
+            FocusSource::Script,
+            FocusOptions {
+                prevent_scroll: false,
+                focus_visible: Some(false),
+            },
+        ));
+        let snap_suppressed = inspect_document(&doc, InspectRequest::default());
+        assert_eq!(snap_suppressed.focused_visible, Some(false));
+        let btn_suppressed = snap_suppressed
+            .nodes
+            .iter()
+            .find(|n| n.id == btn_id.as_u64())
+            .expect("trigger-btn must exist");
+        assert_eq!(btn_suppressed.focus_visible, Some(false));
     }
 }

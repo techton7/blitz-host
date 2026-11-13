@@ -141,6 +141,9 @@ pub struct SemanticNode {
     /// Whether this node currently holds active keyboard focus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused: Option<bool>,
+    /// Whether this node currently matches `:focus-visible` (active focus ring state).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_visible: Option<bool>,
     /// Whether this node currently has mouse hover state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hovered: Option<bool>,
@@ -171,6 +174,9 @@ pub struct InspectResponse {
     /// Optional node ID of the currently focused element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focused_node_id: Option<u64>,
+    /// Whether the currently focused element matches `:focus-visible`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_visible: Option<bool>,
     /// Optional node ID of the currently hovered element.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hover_node_id: Option<u64>,
@@ -211,6 +217,14 @@ pub enum ActionRequest {
         selector: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target: Option<ElementTarget>,
+        /// Optional W3C `FocusOptions.focusVisible` override (`Some(true)` forces `:focus-visible`, `Some(false)` suppresses it).
+        #[serde(
+            rename = "focusVisible",
+            alias = "focus_visible",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        focus_visible: Option<bool>,
     },
     /// Set the text/input value of an editable node or selector.
     SetValue {
@@ -687,6 +701,7 @@ mod tests {
             text: None,
             bounds: Some([0.0, 0.0, 800.0, 600.0]),
             focused: Some(true),
+            focus_visible: Some(true),
             hovered: Some(true),
             active: Some(false),
             scroll_offset: Some([0.0, 150.0]),
@@ -699,6 +714,7 @@ mod tests {
             node_count: 1,
             current_frame: Some(42),
             focused_node_id: Some(1),
+            focused_visible: Some(true),
             hover_node_id: Some(1),
             viewport_scroll: Some([0.0, 50.0]),
             nodes: vec![node],
@@ -706,6 +722,8 @@ mod tests {
         });
 
         let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"focusVisible\":true"));
+        assert!(json.contains("\"focusedVisible\":true"));
         let parsed: ControlResponse = serde_json::from_str(&json).unwrap();
         assert_eq!(resp, parsed);
 
@@ -742,9 +760,11 @@ mod tests {
             node_id: Some(42),
             selector: None,
             target: None,
+            focus_visible: Some(false),
         });
         let focus_json = serde_json::to_string(&focus_req).unwrap();
         assert!(focus_json.contains("\"action\":\"focus\""));
+        assert!(focus_json.contains("\"focusVisible\":false"));
         let focus_parsed: ControlRequest = serde_json::from_str(&focus_json).unwrap();
         assert_eq!(focus_req, focus_parsed);
 

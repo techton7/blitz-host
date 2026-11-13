@@ -5,18 +5,121 @@
 //! and delivers corresponding events to the active Dioxus runtime.
 
 use std::any::Any;
-use std::rc::Rc;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 use std::str::FromStr;
 
-use blitz_dom::{BaseDocument, Document, Node, NodeId};
+use blitz_dom::{
+    BaseDocument, Document, EventDriver, EventHandler as BlitzEventHandler, FocusOptions,
+    FocusSource, Node, NodeId,
+};
 use blitz_traits::SmolStr;
 pub use blitz_traits::events::MouseEventButton;
 use blitz_traits::events::{
-    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, KeyState,
-    MouseEventButtons, PointerCoords, UiEvent,
+    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, DomEvent,
+    DomEventData, EventState, KeyState, MouseEventButtons, PointerCoords, UiEvent,
 };
 use dioxus_native::prelude::*;
 use ::keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
+
+std::thread_local! {
+    static HELD_MOUSE_BUTTONS: Cell<MouseEventButtons> = const { Cell::new(MouseEventButtons::None) };
+}
+
+struct HostDioxusEventHandler {
+    doc_handle: Option<Weak<RefCell<BaseDocument>>>,
+}
+
+impl BlitzEventHandler for HostDioxusEventHandler {
+    fn handle_event(
+        &mut self,
+        chain: &[NodeId],
+        event: &mut DomEvent,
+        doc: &mut dyn Document,
+        event_state: &mut EventState,
+    ) {
+        let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) else {
+            return;
+        };
+
+        let event_data: Option<Rc<dyn Any>> = match &event.data {
+            DomEventData::PointerMove(mevent)
+            | DomEventData::PointerDown(mevent)
+            | DomEventData::PointerUp(mevent)
+            | DomEventData::PointerCancel(mevent)
+            | DomEventData::PointerLeave(mevent)
+            | DomEventData::PointerEnter(mevent)
+            | DomEventData::PointerOver(mevent)
+            | DomEventData::PointerOut(mevent)
+            | DomEventData::GotPointerCapture(mevent)
+            | DomEventData::LostPointerCapture(mevent)
+            | DomEventData::MouseMove(mevent)
+            | DomEventData::MouseDown(mevent)
+            | DomEventData::MouseUp(mevent)
+            | DomEventData::MouseLeave(mevent)
+            | DomEventData::MouseEnter(mevent)
+            | DomEventData::MouseOver(mevent)
+            | DomEventData::MouseOut(mevent)
+            | DomEventData::Click(mevent)
+            | DomEventData::ContextMenu(mevent)
+            | DomEventData::DoubleClick(mevent) => {
+                let ptr = if let Some(weak_doc) = &self.doc_handle {
+                    dioxus_native::NativePointerData::with_target(
+                        mevent.clone(),
+                        weak_doc.clone(),
+                        event.target,
+                    )
+                } else {
+                    dioxus_native::NativePointerData::new(mevent.clone())
+                };
+                Some(Rc::new(PlatformEventData::new(Box::new(ptr))) as Rc<dyn Any>)
+            }
+            DomEventData::Focus(_)
+            | DomEventData::Blur(_)
+            | DomEventData::FocusIn(_)
+            | DomEventData::FocusOut(_) => {
+                Some(Rc::new(PlatformEventData::new(Box::new(()))) as Rc<dyn Any>)
+            }
+            DomEventData::KeyDown(kevent)
+            | DomEventData::KeyUp(kevent)
+            | DomEventData::KeyPress(kevent) => Some(Rc::new(PlatformEventData::new(
+                dioxus_native::synthetic_keyboard_event(kevent.clone()),
+            )) as Rc<dyn Any>),
+            DomEventData::Input(data) => Some(Rc::new(PlatformEventData::new(
+                dioxus_native::synthetic_form_event(data.value.clone(), vec![]),
+            )) as Rc<dyn Any>),
+            _ => None,
+        };
+
+        let Some(event_data) = event_data else {
+            return;
+        };
+
+        let dioxus_id = {
+            let inner = doc.inner();
+            chain
+                .iter()
+                .find_map(|node_id| inner.get_node(*node_id).and_then(get_dioxus_id))
+        };
+        let Some(id) = dioxus_id else {
+            return;
+        };
+
+        let dx_event = dioxus_core::Event::new(event_data.clone(), event.bubbles);
+        runtime.handle_event(event.name(), dx_event.clone(), id);
+        if matches!(&event.data, DomEventData::Input(_)) {
+            let dx_change = dioxus_core::Event::new(event_data, true);
+            runtime.handle_event("change", dx_change, id);
+        }
+
+        if !dx_event.default_action_enabled() {
+            event_state.prevent_default();
+        }
+        if !dx_event.propagates() {
+            event_state.stop_propagation();
+        }
+    }
+}
 
 /// Extract Dioxus [`dioxus_core::ElementId`] from node's "data-dioxus-id" attribute.
 pub fn get_dioxus_id(node: &Node) -> Option<dioxus_core::ElementId> {
@@ -177,82 +280,30 @@ fn is_host_form_control_disabled(doc: &BaseDocument, node_id: NodeId) -> bool {
     false
 }
 
-fn is_host_controlling_summary(doc: &BaseDocument, node_id: NodeId) -> bool {
-    let Some(node) = doc.get_node(node_id) else {
-        return false;
-    };
-    let Some(el) = node.element_data() else {
-        return false;
-    };
-    if &*el.name.local != "summary" {
-        return false;
-    }
-    let Some(parent_id) = node.parent else {
-        return false;
-    };
-    let Some(parent) = doc.get_node(parent_id) else {
-        return false;
-    };
-    parent
-        .element_data()
-        .is_some_and(|pel| &*pel.name.local == "details")
-        && parent.children.iter().copied().find(|&cid| {
-            doc.get_node(cid)
-                .and_then(|n| n.element_data())
-                .is_some_and(|cel| &*cel.name.local == "summary")
-        }) == Some(node_id)
+enum PressFocusResolution {
+    Focus(NodeId),
+    Clear,
+    Unchanged,
 }
 
-fn is_host_keyboard_clickable_input(el: &blitz_dom::ElementData) -> bool {
-    &*el.name.local == "input"
-        && attr_val(el, "type").is_some_and(|t| {
-            t.eq_ignore_ascii_case("button")
-                || t.eq_ignore_ascii_case("submit")
-                || t.eq_ignore_ascii_case("reset")
-                || t.eq_ignore_ascii_case("image")
-                || t.eq_ignore_ascii_case("file")
-        })
-}
-
-fn should_dispatch_enter_click(doc: &BaseDocument, node_id: NodeId, mods: Modifiers) -> bool {
-    let Some(el) = doc.get_node(node_id).and_then(|n| n.element_data()) else {
-        return false;
-    };
-    if is_host_form_control_disabled(doc, node_id) {
-        return false;
-    }
-    let non_link_mods_ok =
-        !mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META);
-    match &*el.name.local {
-        "a" | "area" if has_attr_name(el, "href") => !mods.contains(Modifiers::ALT),
-        "button" => non_link_mods_ok,
-        "input" if is_host_keyboard_clickable_input(el) => non_link_mods_ok,
-        "summary" if is_host_controlling_summary(doc, node_id) => non_link_mods_ok,
-        _ => false,
-    }
-}
-
-fn should_dispatch_space_click(doc: &BaseDocument, node_id: NodeId, mods: Modifiers) -> bool {
-    if mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META | Modifiers::SHIFT) {
-        return false;
-    }
-    let Some(el) = doc.get_node(node_id).and_then(|n| n.element_data()) else {
-        return false;
-    };
-    if is_host_form_control_disabled(doc, node_id) {
-        return false;
-    }
-    match &*el.name.local {
-        "button" => true,
-        "input" => {
-            is_host_keyboard_clickable_input(el)
-                || attr_val(el, "type").is_some_and(|t| {
-                    t.eq_ignore_ascii_case("checkbox") || t.eq_ignore_ascii_case("radio")
-                })
+fn resolve_press_focus_target(doc: &BaseDocument, start_id: NodeId) -> PressFocusResolution {
+    let mut curr = Some(start_id);
+    while let Some(node_id) = curr {
+        if is_host_form_control_disabled(doc, node_id) {
+            return PressFocusResolution::Unchanged;
         }
-        "summary" => is_host_controlling_summary(doc, node_id),
-        _ => false,
+        let Some(node) = doc.get_node(node_id) else {
+            break;
+        };
+        if let Some(el) = node.element_data() {
+            let has_tabindex = attr_val(el, "tabindex").is_some_and(|v| v.trim().parse::<i32>().is_ok());
+            if el.is_focussable || has_tabindex {
+                return PressFocusResolution::Focus(node_id);
+            }
+        }
+        curr = node.parent;
     }
+    PressFocusResolution::Clear
 }
 
 /// Construct click event payload for a node.
@@ -283,21 +334,135 @@ pub fn dispatch_click(doc: &BaseDocument, node_id: NodeId, modifiers: Modifiers)
     }
 }
 
+/// Dispatch a pointer-modality click event on `doc_rc`, updating pointer focus modality
+/// (`FocusSource::Pointer`) before delivering `"click"` with a target-aware `NativePointerData`.
+pub fn dispatch_click_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    node_id: NodeId,
+    modifiers: Modifiers,
+) -> bool {
+    let (old_dx, new_dx, click_dispatch) = {
+        let mut doc = doc_rc.borrow_mut();
+        if doc.get_node(node_id).is_none() {
+            return false;
+        }
+        let old_focus = doc.get_focussed_node_id();
+        match resolve_press_focus_target(&doc, node_id) {
+            PressFocusResolution::Focus(focus_id) => {
+                let _ = doc.set_focus_to_with_source(focus_id, FocusSource::Pointer);
+            }
+            PressFocusResolution::Clear => {
+                let root_id = doc.root_node().id;
+                let _ = doc.set_focus_to_with_source(root_id, FocusSource::Pointer);
+                doc.clear_focus();
+            }
+            PressFocusResolution::Unchanged => {}
+        }
+        let new_focus = doc.get_focussed_node_id();
+        let old_dx = if old_focus != new_focus {
+            old_focus.and_then(|oid| find_dioxus_target(&doc, oid).map(|(dx, _)| dx))
+        } else {
+            None
+        };
+        let new_dx = if old_focus != new_focus {
+            new_focus.and_then(|nid| find_dioxus_target(&doc, nid).map(|(dx, _)| dx))
+        } else {
+            None
+        };
+
+        let click_dispatch = find_dioxus_target(&doc, node_id).and_then(|(dx_id, target_nid)| {
+            let (x, y) = get_node_center_coords(&doc, target_nid).unwrap_or((0.0, 0.0));
+            let ptr_event = BlitzPointerEvent {
+                id: BlitzPointerId::Mouse,
+                is_primary: true,
+                coords: PointerCoords {
+                    page_x: x,
+                    page_y: y,
+                    screen_x: x,
+                    screen_y: y,
+                    client_x: x,
+                    client_y: y,
+                },
+                button: MouseEventButton::Main,
+                buttons: MouseEventButtons::None,
+                mods: modifiers,
+                details: Default::default(),
+                element: Default::default(),
+                active_pointers: Default::default(),
+            };
+            let ptr_data = dioxus_native::NativePointerData::with_target(
+                ptr_event,
+                Rc::downgrade(doc_rc),
+                target_nid,
+            );
+            Some((dx_id, ptr_data))
+        });
+
+        (old_dx, new_dx, click_dispatch)
+    };
+
+    let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) else {
+        return true;
+    };
+
+    if let Some(old_id) = old_dx {
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_blur = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+        let dx_focusout = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("blur", dx_blur, old_id);
+        runtime.handle_event("focusout", dx_focusout, old_id);
+    }
+    if let Some(new_id) = new_dx {
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_focus = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+        let dx_focusin = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("focus", dx_focus, new_id);
+        runtime.handle_event("focusin", dx_focusin, new_id);
+    }
+
+    if let Some((dioxus_id, ptr_data)) = click_dispatch {
+        let platform_event = PlatformEventData::new(Box::new(ptr_data));
+        let dx_event = dioxus_core::Event::new(Rc::new(platform_event) as Rc<dyn Any>, true);
+        runtime.handle_event("click", dx_event, dioxus_id);
+    }
+    true
+}
+
 /// Dispatch a focus event on a target node in `doc`.
 /// Sets focus on the Blitz DOM node and dispatches "focus" and "focusin" events to Dioxus listeners.
 pub fn dispatch_focus(doc: &mut BaseDocument, node_id: NodeId) -> bool {
+    dispatch_focus_with_options(doc, node_id, FocusOptions::default())
+}
+
+/// Dispatch a focus event on a target node in `doc` with explicit [`FocusOptions`].
+pub fn dispatch_focus_with_options(
+    doc: &mut BaseDocument,
+    node_id: NodeId,
+    options: FocusOptions,
+) -> bool {
     let Some((dioxus_id, target_node_id)) = find_dioxus_target(doc, node_id) else {
-        return false;
+        let _ = doc.set_focus_to_with_options(node_id, FocusSource::Script, options);
+        return doc.get_focussed_node_id() == Some(node_id);
     };
 
-    // Update Blitz DOM focus state
-    let _ = doc.set_focus_to(target_node_id);
-
-    // Dispatch Dioxus focus events
-    let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
-    let dx_focus = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+    let old_focus = doc.get_focussed_node_id();
+    let _ = doc.set_focus_to_with_options(target_node_id, FocusSource::Script, options);
+    let old_dx = if old_focus != Some(target_node_id) {
+        old_focus.and_then(|oid| find_dioxus_target(doc, oid).map(|(dx, _)| dx))
+    } else {
+        None
+    };
 
     if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
+        if let Some(old_id) = old_dx {
+            let platform_blur = Rc::new(PlatformEventData::new(Box::new(())));
+            let dx_blur = dioxus_core::Event::new(platform_blur.clone() as Rc<dyn Any>, false);
+            let dx_focusout = dioxus_core::Event::new(platform_blur as Rc<dyn Any>, true);
+            runtime.handle_event("blur", dx_blur, old_id);
+            runtime.handle_event("focusout", dx_focusout, old_id);
+        }
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_focus = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
         runtime.handle_event("focus", dx_focus, dioxus_id);
         let dx_focusin = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
         runtime.handle_event("focusin", dx_focusin, dioxus_id);
@@ -305,6 +470,55 @@ pub fn dispatch_focus(doc: &mut BaseDocument, node_id: NodeId) -> bool {
     } else {
         true
     }
+}
+
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_focus_with_options`].
+pub fn dispatch_focus_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    node_id: NodeId,
+    focus_visible: Option<bool>,
+) -> bool {
+    let options = FocusOptions {
+        prevent_scroll: false,
+        focus_visible,
+    };
+    let (target_dx, old_dx, raw_ok) = {
+        let mut doc = doc_rc.borrow_mut();
+        if let Some((dioxus_id, target_node_id)) = find_dioxus_target(&doc, node_id) {
+            let old_focus = doc.get_focussed_node_id();
+            let _ = doc.set_focus_to_with_options(target_node_id, FocusSource::Script, options);
+            let old_dx = if old_focus != Some(target_node_id) {
+                old_focus.and_then(|oid| find_dioxus_target(&doc, oid).map(|(dx, _)| dx))
+            } else {
+                None
+            };
+            (Some(dioxus_id), old_dx, true)
+        } else {
+            let _ = doc.set_focus_to_with_options(node_id, FocusSource::Script, options);
+            let ok = doc.get_focussed_node_id() == Some(node_id);
+            (None, None, ok)
+        }
+    };
+
+    let Some(dioxus_id) = target_dx else {
+        return raw_ok;
+    };
+
+    if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
+        if let Some(old_id) = old_dx {
+            let platform_blur = Rc::new(PlatformEventData::new(Box::new(())));
+            let dx_blur = dioxus_core::Event::new(platform_blur.clone() as Rc<dyn Any>, false);
+            let dx_focusout = dioxus_core::Event::new(platform_blur as Rc<dyn Any>, true);
+            runtime.handle_event("blur", dx_blur, old_id);
+            runtime.handle_event("focusout", dx_focusout, old_id);
+        }
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_focus = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+        runtime.handle_event("focus", dx_focus, dioxus_id);
+        let dx_focusin = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("focusin", dx_focusin, dioxus_id);
+    }
+    true
 }
 
 /// Dispatch an input/value change on a target node in `doc`.
@@ -315,10 +529,8 @@ pub fn dispatch_input(doc: &mut BaseDocument, node_id: NodeId, value: &str) -> b
         return false;
     };
 
-    // If target node is a text input, update its editor buffer and refresh layout
     doc.set_text_input_value(target_node_id, value);
 
-    // Dispatch Dioxus input and change events
     let event_data = dioxus_native::synthetic_form_event(value, vec![]);
     let platform_event = Rc::new(PlatformEventData::new(event_data));
     let dx_input = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
@@ -333,17 +545,76 @@ pub fn dispatch_input(doc: &mut BaseDocument, node_id: NodeId, value: &str) -> b
     }
 }
 
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_input`].
+pub fn dispatch_input_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    node_id: NodeId,
+    value: &str,
+) -> bool {
+    let dioxus_id = {
+        let mut doc = doc_rc.borrow_mut();
+        let Some((dioxus_id, target_node_id)) = find_dioxus_target(&doc, node_id) else {
+            return false;
+        };
+        doc.set_text_input_value(target_node_id, value);
+        dioxus_id
+    };
+
+    let event_data = dioxus_native::synthetic_form_event(value, vec![]);
+    let platform_event = Rc::new(PlatformEventData::new(event_data));
+    let dx_input = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
+
+    if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
+        runtime.handle_event("input", dx_input, dioxus_id);
+        let dx_change = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("change", dx_change, dioxus_id);
+    }
+    true
+}
+
+fn build_key_events(
+    key_str: &str,
+    modifiers: Modifiers,
+) -> (Key, Modifiers, BlitzKeyEvent, BlitzKeyEvent) {
+    let (key, code, parsed_mods) = parse_key_str(key_str);
+    let combined_mods = modifiers | parsed_mods;
+    let text_payload = match &key {
+        Key::Character(s) => Some(SmolStr::new(s)),
+        _ => None,
+    };
+    let key_down = BlitzKeyEvent {
+        key: key.clone(),
+        code,
+        modifiers: combined_mods,
+        location: Location::Standard,
+        is_auto_repeating: false,
+        is_composing: false,
+        state: KeyState::Pressed,
+        text: text_payload,
+    };
+    let key_up = BlitzKeyEvent {
+        key: key.clone(),
+        code,
+        modifiers: combined_mods,
+        location: Location::Standard,
+        is_auto_repeating: false,
+        is_composing: false,
+        state: KeyState::Released,
+        text: None,
+    };
+    (key, combined_mods, key_down, key_up)
+}
+
 /// Dispatch a keyboard action on a target node in `doc`.
-/// Drives real Blitz DOM keyboard handling, Dioxus VirtualDom keyboard events,
-/// and reactive updates for Focus/Activation, Text Editing, Navigation, and Modifiers.
+/// Drives real Blitz DOM `EventDriver` keyboard handling, `:focus-visible` modality,
+/// HTML Enter/Space activation (`#839`), Tab traversal, Escape focus clearing, and text editing.
 pub fn dispatch_key(
     doc: &mut BaseDocument,
     node_id: Option<NodeId>,
     key_str: &str,
     modifiers: Modifiers,
 ) -> Result<NodeId, String> {
-    let (key, code, parsed_mods) = parse_key_str(key_str);
-    let combined_mods = modifiers | parsed_mods;
+    let (key, _combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
 
     let target_node_id = match node_id {
         Some(nid) => {
@@ -356,174 +627,129 @@ pub fn dispatch_key(
             .get_focussed_node_id()
             .unwrap_or_else(|| doc.root_node().id),
     };
+    let old_focus = doc.get_focussed_node_id();
 
-    // 1. Handle Tab / Shift+Tab focus traversal
-    if key == Key::Named(NamedKey::Tab) {
-        let old_focus = doc.get_focussed_node_id();
-        let new_focus = if combined_mods.contains(Modifiers::SHIFT) {
-            doc.focus_prev_node()
-        } else {
-            doc.focus_next_node()
-        };
-
-        if let Some(new_id) = new_focus {
-            if let Some(old_id) = old_focus
-                && old_id != new_id
-                && let Some(node) = doc.get_node(old_id)
-                && let Some(dioxus_id) = get_dioxus_id(node)
-            {
-                let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
-                let dx_blur = dioxus_core::Event::new(platform_event as Rc<dyn Any>, false);
-                if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
-                    runtime.handle_event("blur", dx_blur, dioxus_id);
-                }
-            }
-
-            if let Some(node) = doc.get_node(new_id)
-                && let Some(dioxus_id) = get_dioxus_id(node)
-            {
-                let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
-                let dx_focus =
-                    dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
-                let dx_focusin = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-                if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
-                    runtime.handle_event("focus", dx_focus, dioxus_id);
-                    runtime.handle_event("focusin", dx_focusin, dioxus_id);
-                }
-            }
-            return Ok(new_id);
-        }
-        return Ok(target_node_id);
+    {
+        let mut driver = EventDriver::new(doc, HostDioxusEventHandler { doc_handle: None });
+        driver.handle_ui_event(UiEvent::KeyDown(key_down));
+        driver.handle_ui_event(UiEvent::KeyUp(key_up));
     }
 
-    // 2. Handle Escape focus clearing
     if key == Key::Named(NamedKey::Escape)
-        && let Some(old_id) = doc.get_focussed_node_id()
-    {
-        doc.clear_focus();
-        if let Some(node) = doc.get_node(old_id)
-            && let Some(dioxus_id) = get_dioxus_id(node)
-        {
-            let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
-            let dx_blur = dioxus_core::Event::new(platform_event as Rc<dyn Any>, false);
-            if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
-                runtime.handle_event("blur", dx_blur, dioxus_id);
-            }
-        }
-    }
-
-    // 3. Construct BlitzKeyEvent for KeyDown and KeyUp
-    let text_payload = match &key {
-        Key::Character(s) => Some(SmolStr::new(s)),
-        _ => None,
-    };
-
-    let key_down = BlitzKeyEvent {
-        key: key.clone(),
-        code,
-        modifiers: combined_mods,
-        location: Location::Standard,
-        is_auto_repeating: false,
-        is_composing: false,
-        state: KeyState::Pressed,
-        text: text_payload,
-    };
-
-    let key_up = BlitzKeyEvent {
-        key: key.clone(),
-        code,
-        modifiers: combined_mods,
-        location: Location::Standard,
-        is_auto_repeating: false,
-        is_composing: false,
-        state: KeyState::Released,
-        text: None,
-    };
-
-    // 4. Dispatch Dioxus KeyDown FIRST so `evt.prevent_default()` cancels engine & synthetic click actions
-    let mut keydown_cancelled = false;
-    if let Some((dioxus_id, _)) = find_dioxus_target(doc, target_node_id)
+        && let Some(old_id) = old_focus
+        && doc.get_focussed_node_id().is_none()
+        && let Some((dioxus_id, _)) = find_dioxus_target(doc, old_id)
         && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
     {
-        let platform_down = Rc::new(PlatformEventData::new(
-            dioxus_native::synthetic_keyboard_event(key_down.clone()),
-        ));
-        let dx_down = dioxus_core::Event::new(platform_down as Rc<dyn Any>, true);
-        runtime.handle_event("keydown", dx_down.clone(), dioxus_id);
-        keydown_cancelled = !dx_down.default_action_enabled();
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_blur = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+        let dx_focusout = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("blur", dx_blur, dioxus_id);
+        runtime.handle_event("focusout", dx_focusout, dioxus_id);
     }
 
-    let is_space = matches!(&key, Key::Character(s) if s == " ");
-    let mut space_armed = false;
-
-    // 5. Run KeyDown default action when not cancelled
-    if !keydown_cancelled {
-        doc.handle_ui_event(UiEvent::KeyDown(key_down));
-
-        // If target node is a text input, propagate updated value to Dioxus listeners
-        if let Some(node) = doc.get_node(target_node_id)
-            && let Some(el) = node.element_data()
-            && let Some(input_data) = el.text_input_data()
-        {
-            let current_val = input_data.editor.raw_text().to_string();
-            let event_data = dioxus_native::synthetic_form_event(current_val, vec![]);
-            let platform_event = Rc::new(PlatformEventData::new(event_data));
-            let dx_input = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
-            let dx_change = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-
-            if let Some(dioxus_id) = get_dioxus_id(node)
-                && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
-            {
-                runtime.handle_event("input", dx_input, dioxus_id);
-                runtime.handle_event("change", dx_change, dioxus_id);
-            }
-        }
-
-        if key == Key::Named(NamedKey::Enter)
-            && doc.get_focussed_node_id() == Some(target_node_id)
-            && should_dispatch_enter_click(doc, target_node_id, combined_mods)
-        {
-            dispatch_click(doc, target_node_id, combined_mods);
-        } else if is_space
-            && doc.get_focussed_node_id() == Some(target_node_id)
-            && should_dispatch_space_click(doc, target_node_id, combined_mods)
-        {
-            space_armed = true;
-        }
+    if key == Key::Named(NamedKey::Tab) {
+        return Ok(doc.get_focussed_node_id().unwrap_or(target_node_id));
     }
-
-    // 6. Dispatch Dioxus KeyUp event
-    let mut keyup_cancelled = false;
-    let keyup_target_id = doc.get_focussed_node_id().unwrap_or(target_node_id);
-    if let Some((dioxus_id, _)) = find_dioxus_target(doc, keyup_target_id)
-        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
-    {
-        let platform_up = Rc::new(PlatformEventData::new(
-            dioxus_native::synthetic_keyboard_event(key_up.clone()),
-        ));
-        let dx_up = dioxus_core::Event::new(platform_up as Rc<dyn Any>, true);
-        runtime.handle_event("keyup", dx_up.clone(), dioxus_id);
-        keyup_cancelled = !dx_up.default_action_enabled();
-    }
-
-    // 7. Run KeyUp default action when neither KeyDown nor KeyUp was cancelled
-    if !keydown_cancelled && !keyup_cancelled {
-        doc.handle_ui_event(UiEvent::KeyUp(key_up));
-
-        if space_armed
-            && doc.get_focussed_node_id() == Some(target_node_id)
-            && should_dispatch_space_click(doc, target_node_id, combined_mods)
-        {
-            dispatch_click(doc, target_node_id, combined_mods);
-        }
-    }
-
     Ok(target_node_id)
 }
 
-/// Dispatch a pointer/mouse move event in `doc`.
-/// Drives Blitz DOM hover state resolution and delivers
-/// Dioxus pointer and mouse events (`pointermove`, `mousemove`, `pointerenter`, `pointerleave`, etc.).
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_key`].
+pub fn dispatch_key_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    node_id: Option<NodeId>,
+    key_str: &str,
+    modifiers: Modifiers,
+) -> Result<NodeId, String> {
+    let (key, _combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
+
+    let (target_node_id, old_focus) = {
+        let mut doc = doc_rc.borrow_mut();
+        let target_node_id = match node_id {
+            Some(nid) => {
+                if doc.get_focussed_node_id() != Some(nid) {
+                    doc.set_focus_to(nid);
+                }
+                nid
+            }
+            None => doc
+                .get_focussed_node_id()
+                .unwrap_or_else(|| doc.root_node().id),
+        };
+        let old_focus = doc.get_focussed_node_id();
+        (target_node_id, old_focus)
+    };
+
+    {
+        let mut doc_handle = Rc::clone(doc_rc);
+        let mut driver = EventDriver::new(
+            &mut doc_handle,
+            HostDioxusEventHandler {
+                doc_handle: Some(Rc::downgrade(doc_rc)),
+            },
+        );
+        driver.handle_ui_event(UiEvent::KeyDown(key_down));
+        driver.handle_ui_event(UiEvent::KeyUp(key_up));
+    }
+
+    let (escape_blur_dx, final_focus) = {
+        let doc = doc_rc.borrow();
+        let final_focus = doc.get_focussed_node_id();
+        let escape_blur_dx = if key == Key::Named(NamedKey::Escape)
+            && let Some(old_id) = old_focus
+            && final_focus.is_none()
+        {
+            find_dioxus_target(&doc, old_id).map(|(dx, _)| dx)
+        } else {
+            None
+        };
+        (escape_blur_dx, final_focus)
+    };
+
+    if let Some(dioxus_id) = escape_blur_dx
+        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
+    {
+        let platform_event = Rc::new(PlatformEventData::new(Box::new(())));
+        let dx_blur = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
+        let dx_focusout = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
+        runtime.handle_event("blur", dx_blur, dioxus_id);
+        runtime.handle_event("focusout", dx_focusout, dioxus_id);
+    }
+
+    if key == Key::Named(NamedKey::Tab) {
+        return Ok(final_focus.unwrap_or(target_node_id));
+    }
+    Ok(target_node_id)
+}
+
+fn build_pointer_event(
+    x: f32,
+    y: f32,
+    button: MouseEventButton,
+    buttons: MouseEventButtons,
+    modifiers: Modifiers,
+) -> BlitzPointerEvent {
+    BlitzPointerEvent {
+        id: BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button,
+        buttons,
+        mods: modifiers,
+        details: Default::default(),
+        element: Default::default(),
+        active_pointers: Default::default(),
+    }
+}
+
+/// Dispatch a pointer/mouse move event in `doc` via Blitz `EventDriver` (honoring W3C pointer capture).
 pub fn dispatch_pointer_move(
     doc: &mut BaseDocument,
     target_node_id: Option<NodeId>,
@@ -539,84 +765,63 @@ pub fn dispatch_pointer_move(
         (0.0, 0.0)
     };
 
-    let prev_hover = doc.get_hover_node_id();
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| c.get());
+    let ptr_event = build_pointer_event(x, y, MouseEventButton::Main, buttons, modifiers);
 
-    let ptr_event = BlitzPointerEvent {
-        id: BlitzPointerId::Mouse,
-        is_primary: true,
-        coords: PointerCoords {
-            page_x: x,
-            page_y: y,
-            screen_x: x,
-            screen_y: y,
-            client_x: x,
-            client_y: y,
-        },
-        button: MouseEventButton::Main,
-        buttons: MouseEventButtons::None,
-        mods: modifiers,
-        details: Default::default(),
-        element: Default::default(),
-        active_pointers: Default::default(),
-    };
-
-    // 1. Dispatch UI event to BaseDocument (updates doc.hover_node_id and element states)
-    doc.handle_ui_event(UiEvent::PointerMove(ptr_event));
-
-    let curr_hover = doc.get_hover_node_id().or(target_node_id);
-    let resolved_nid = curr_hover.unwrap_or_else(|| doc.root_node().id);
-
-    // 2. Dispatch Dioxus pointer events via Runtime::current
-    if let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current) {
-        let platform_event = if let Some(node) = doc.get_node(resolved_nid) {
-            Rc::new(PlatformEventData::new(click_event_payload(node, modifiers)))
-        } else {
-            Rc::new(PlatformEventData::new(Box::new(())))
-        };
-
-        // If hovered target changed, dispatch leave on old and enter on new
-        if prev_hover != curr_hover {
-            if let Some(prev_id) = prev_hover
-                && let Some((prev_dx_id, _)) = find_dioxus_target(doc, prev_id)
-            {
-                let dx_leave =
-                    dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
-                runtime.handle_event("pointerleave", dx_leave.clone(), prev_dx_id);
-                runtime.handle_event("mouseleave", dx_leave, prev_dx_id);
-
-                let dx_out = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
-                runtime.handle_event("pointerout", dx_out.clone(), prev_dx_id);
-                runtime.handle_event("mouseout", dx_out, prev_dx_id);
-            }
-
-            if let Some(curr_id) = curr_hover
-                && let Some((curr_dx_id, _)) = find_dioxus_target(doc, curr_id)
-            {
-                let dx_enter =
-                    dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, false);
-                runtime.handle_event("pointerenter", dx_enter.clone(), curr_dx_id);
-                runtime.handle_event("mouseenter", dx_enter, curr_dx_id);
-
-                let dx_over = dioxus_core::Event::new(platform_event.clone() as Rc<dyn Any>, true);
-                runtime.handle_event("pointerover", dx_over.clone(), curr_dx_id);
-                runtime.handle_event("mouseover", dx_over, curr_dx_id);
-            }
-        }
-
-        // Always dispatch pointermove / mousemove to current hovered target
-        if let Some((curr_dx_id, _)) = find_dioxus_target(doc, resolved_nid) {
-            let dx_move = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-            runtime.handle_event("pointermove", dx_move.clone(), curr_dx_id);
-            runtime.handle_event("mousemove", dx_move, curr_dx_id);
-        }
+    {
+        let mut driver = EventDriver::new(doc, HostDioxusEventHandler { doc_handle: None });
+        driver.handle_ui_event(UiEvent::PointerMove(ptr_event));
     }
 
+    let resolved_nid = doc
+        .get_hover_node_id()
+        .or(target_node_id)
+        .unwrap_or_else(|| doc.root_node().id);
     Ok(resolved_nid)
 }
 
-/// Dispatch a pointer/mouse down event on a target node or coordinates in `doc`.
-/// Drives Blitz DOM active state (`doc.active_node()`), focus, text selection, and delivers
-/// Dioxus `pointerdown` and `mousedown` events.
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_pointer_move`].
+pub fn dispatch_pointer_move_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    target_node_id: Option<NodeId>,
+    coords: Option<(f32, f32)>,
+    modifiers: Modifiers,
+) -> Result<NodeId, String> {
+    let (x, y) = {
+        let doc = doc_rc.borrow();
+        if let Some(c) = coords {
+            c
+        } else if let Some(nid) = target_node_id {
+            get_node_center_coords(&doc, nid)
+                .ok_or_else(|| format!("Target node #{:?} not found for pointer move", nid))?
+        } else {
+            (0.0, 0.0)
+        }
+    };
+
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| c.get());
+    let ptr_event = build_pointer_event(x, y, MouseEventButton::Main, buttons, modifiers);
+
+    {
+        let mut doc_handle = Rc::clone(doc_rc);
+        let mut driver = EventDriver::new(
+            &mut doc_handle,
+            HostDioxusEventHandler {
+                doc_handle: Some(Rc::downgrade(doc_rc)),
+            },
+        );
+        driver.handle_ui_event(UiEvent::PointerMove(ptr_event));
+    }
+
+    let doc = doc_rc.borrow();
+    let resolved_nid = doc
+        .get_hover_node_id()
+        .or(target_node_id)
+        .unwrap_or_else(|| doc.root_node().id);
+    Ok(resolved_nid)
+}
+
+/// Dispatch a pointer/mouse down event on a target node or coordinates in `doc` via Blitz `EventDriver`.
 pub fn dispatch_pointer_down(
     doc: &mut BaseDocument,
     target_node_id: Option<NodeId>,
@@ -635,57 +840,72 @@ pub fn dispatch_pointer_down(
         (0.0, 0.0)
     };
 
-    // Ensure hover is set to coordinates
-    let _ = doc.set_hover_to(x, y);
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| {
+        let next = c.get() | MouseEventButtons::from(button);
+        c.set(next);
+        next
+    });
+    let ptr_event = build_pointer_event(x, y, button, buttons, modifiers);
 
-    let buttons = MouseEventButtons::from(button);
-
-    let ptr_event = BlitzPointerEvent {
-        id: BlitzPointerId::Mouse,
-        is_primary: true,
-        coords: PointerCoords {
-            page_x: x,
-            page_y: y,
-            screen_x: x,
-            screen_y: y,
-            client_x: x,
-            client_y: y,
-        },
-        button,
-        buttons,
-        mods: modifiers,
-        details: Default::default(),
-        element: Default::default(),
-        active_pointers: Default::default(),
-    };
-
-    // 1. Dispatch UI event to BaseDocument (activates node, sets mousedown_node_id, handles focus)
-    doc.handle_ui_event(UiEvent::PointerDown(ptr_event));
+    {
+        let mut driver = EventDriver::new(doc, HostDioxusEventHandler { doc_handle: None });
+        driver.handle_ui_event(UiEvent::PointerDown(ptr_event));
+    }
 
     let resolved_nid = target_node_id
         .or(doc.get_hover_node_id())
         .unwrap_or_else(|| doc.root_node().id);
-
-    // 2. Dispatch Dioxus pointerdown and mousedown events
-    if let Some((dioxus_id, _)) = find_dioxus_target(doc, resolved_nid)
-        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
-    {
-        let platform_event = if let Some(node) = doc.get_node(resolved_nid) {
-            Rc::new(PlatformEventData::new(click_event_payload(node, modifiers)))
-        } else {
-            Rc::new(PlatformEventData::new(Box::new(())))
-        };
-        let dx_down = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-        runtime.handle_event("pointerdown", dx_down.clone(), dioxus_id);
-        runtime.handle_event("mousedown", dx_down, dioxus_id);
-    }
-
     Ok(resolved_nid)
 }
 
-/// Dispatch a pointer/mouse up event on a target node or coordinates in `doc`.
-/// Drives Blitz DOM unactive state (`doc.unactive_node()`) and delivers
-/// Dioxus `pointerup` and `mouseup` events.
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_pointer_down`].
+pub fn dispatch_pointer_down_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    target_node_id: Option<NodeId>,
+    coords: Option<(f32, f32)>,
+    button: MouseEventButton,
+    modifiers: Modifiers,
+) -> Result<NodeId, String> {
+    let (x, y) = {
+        let doc = doc_rc.borrow();
+        if let Some(c) = coords {
+            c
+        } else if let Some(nid) = target_node_id {
+            get_node_center_coords(&doc, nid)
+                .ok_or_else(|| format!("Target node #{:?} not found for pointer down", nid))?
+        } else if let Some(nid) = doc.get_hover_node_id() {
+            get_node_center_coords(&doc, nid).unwrap_or((0.0, 0.0))
+        } else {
+            (0.0, 0.0)
+        }
+    };
+
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| {
+        let next = c.get() | MouseEventButtons::from(button);
+        c.set(next);
+        next
+    });
+    let ptr_event = build_pointer_event(x, y, button, buttons, modifiers);
+
+    {
+        let mut doc_handle = Rc::clone(doc_rc);
+        let mut driver = EventDriver::new(
+            &mut doc_handle,
+            HostDioxusEventHandler {
+                doc_handle: Some(Rc::downgrade(doc_rc)),
+            },
+        );
+        driver.handle_ui_event(UiEvent::PointerDown(ptr_event));
+    }
+
+    let doc = doc_rc.borrow();
+    let resolved_nid = target_node_id
+        .or(doc.get_hover_node_id())
+        .unwrap_or_else(|| doc.root_node().id);
+    Ok(resolved_nid)
+}
+
+/// Dispatch a pointer/mouse up event on a target node or coordinates in `doc` via Blitz `EventDriver`.
 pub fn dispatch_pointer_up(
     doc: &mut BaseDocument,
     target_node_id: Option<NodeId>,
@@ -704,46 +924,68 @@ pub fn dispatch_pointer_up(
         (0.0, 0.0)
     };
 
-    let ptr_event = BlitzPointerEvent {
-        id: BlitzPointerId::Mouse,
-        is_primary: true,
-        coords: PointerCoords {
-            page_x: x,
-            page_y: y,
-            screen_x: x,
-            screen_y: y,
-            client_x: x,
-            client_y: y,
-        },
-        button,
-        buttons: MouseEventButtons::None,
-        mods: modifiers,
-        details: Default::default(),
-        element: Default::default(),
-        active_pointers: Default::default(),
-    };
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| {
+        let next = c.get() & !MouseEventButtons::from(button);
+        c.set(next);
+        next
+    });
+    let ptr_event = build_pointer_event(x, y, button, buttons, modifiers);
 
-    // 1. Dispatch UI event to BaseDocument (unactivates node)
-    doc.handle_ui_event(UiEvent::PointerUp(ptr_event));
+    {
+        let mut driver = EventDriver::new(doc, HostDioxusEventHandler { doc_handle: None });
+        driver.handle_ui_event(UiEvent::PointerUp(ptr_event));
+    }
 
     let resolved_nid = target_node_id
         .or(doc.get_hover_node_id())
         .unwrap_or_else(|| doc.root_node().id);
+    Ok(resolved_nid)
+}
 
-    // 2. Dispatch Dioxus pointerup and mouseup events
-    if let Some((dioxus_id, _)) = find_dioxus_target(doc, resolved_nid)
-        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
-    {
-        let platform_event = if let Some(node) = doc.get_node(resolved_nid) {
-            Rc::new(PlatformEventData::new(click_event_payload(node, modifiers)))
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_pointer_up`].
+pub fn dispatch_pointer_up_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    target_node_id: Option<NodeId>,
+    coords: Option<(f32, f32)>,
+    button: MouseEventButton,
+    modifiers: Modifiers,
+) -> Result<NodeId, String> {
+    let (x, y) = {
+        let doc = doc_rc.borrow();
+        if let Some(c) = coords {
+            c
+        } else if let Some(nid) = target_node_id {
+            get_node_center_coords(&doc, nid)
+                .ok_or_else(|| format!("Target node #{:?} not found for pointer up", nid))?
+        } else if let Some(nid) = doc.get_hover_node_id() {
+            get_node_center_coords(&doc, nid).unwrap_or((0.0, 0.0))
         } else {
-            Rc::new(PlatformEventData::new(Box::new(())))
-        };
-        let dx_up = dioxus_core::Event::new(platform_event as Rc<dyn Any>, true);
-        runtime.handle_event("pointerup", dx_up.clone(), dioxus_id);
-        runtime.handle_event("mouseup", dx_up, dioxus_id);
+            (0.0, 0.0)
+        }
+    };
+
+    let buttons = HELD_MOUSE_BUTTONS.with(|c| {
+        let next = c.get() & !MouseEventButtons::from(button);
+        c.set(next);
+        next
+    });
+    let ptr_event = build_pointer_event(x, y, button, buttons, modifiers);
+
+    {
+        let mut doc_handle = Rc::clone(doc_rc);
+        let mut driver = EventDriver::new(
+            &mut doc_handle,
+            HostDioxusEventHandler {
+                doc_handle: Some(Rc::downgrade(doc_rc)),
+            },
+        );
+        driver.handle_ui_event(UiEvent::PointerUp(ptr_event));
     }
 
+    let doc = doc_rc.borrow();
+    let resolved_nid = target_node_id
+        .or(doc.get_hover_node_id())
+        .unwrap_or_else(|| doc.root_node().id);
     Ok(resolved_nid)
 }
 
@@ -768,7 +1010,6 @@ pub fn dispatch_wheel(
         (0.0, 0.0)
     };
 
-    // Ensure hover position is set at scroll point
     let _ = doc.set_hover_to(x, y);
 
     let resolved_nid = doc
@@ -786,15 +1027,13 @@ pub fn dispatch_wheel(
             client_x: x,
             client_y: y,
         },
-        buttons: MouseEventButtons::None,
+        buttons: HELD_MOUSE_BUTTONS.with(|c| c.get()),
         mods: modifiers,
         element: Default::default(),
     };
 
-    // 1. Dispatch UI event to BaseDocument (triggers handle_wheel and doc.scroll_chain_by)
     doc.handle_ui_event(UiEvent::Wheel(wheel_event));
 
-    // 2. Dispatch Dioxus wheel and scroll events
     if let Some((dioxus_id, _target_actual_id)) = find_dioxus_target(doc, resolved_nid)
         && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
     {
@@ -803,6 +1042,73 @@ pub fn dispatch_wheel(
         } else {
             Rc::new(PlatformEventData::new(Box::new(())))
         };
+        let dx_wheel = dioxus_core::Event::new(platform_wheel as Rc<dyn Any>, true);
+        runtime.handle_event("wheel", dx_wheel, dioxus_id);
+    }
+
+    Ok(resolved_nid)
+}
+
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_wheel`].
+pub fn dispatch_wheel_rc(
+    doc_rc: &Rc<RefCell<BaseDocument>>,
+    target_node_id: Option<NodeId>,
+    coords: Option<(f32, f32)>,
+    delta_x: f64,
+    delta_y: f64,
+    modifiers: Modifiers,
+) -> Result<NodeId, String> {
+    let (resolved_nid, wheel_dispatch) = {
+        let mut doc = doc_rc.borrow_mut();
+        let (x, y) = if let Some(c) = coords {
+            c
+        } else if let Some(nid) = target_node_id {
+            get_node_center_coords(&doc, nid)
+                .ok_or_else(|| format!("Target node #{:?} not found for wheel", nid))?
+        } else if let Some(nid) = doc.get_hover_node_id() {
+            get_node_center_coords(&doc, nid).unwrap_or((0.0, 0.0))
+        } else {
+            (0.0, 0.0)
+        };
+
+        let _ = doc.set_hover_to(x, y);
+
+        let resolved_nid = doc
+            .get_hover_node_id()
+            .or(target_node_id)
+            .unwrap_or_else(|| doc.root_node().id);
+
+        let wheel_event = BlitzWheelEvent {
+            delta: BlitzWheelDelta::Pixels(delta_x, delta_y),
+            coords: PointerCoords {
+                page_x: x,
+                page_y: y,
+                screen_x: x,
+                screen_y: y,
+                client_x: x,
+                client_y: y,
+            },
+            buttons: HELD_MOUSE_BUTTONS.with(|c| c.get()),
+            mods: modifiers,
+            element: Default::default(),
+        };
+
+        doc.handle_ui_event(UiEvent::Wheel(wheel_event));
+
+        let wheel_dispatch = find_dioxus_target(&doc, resolved_nid).map(|(dioxus_id, _)| {
+            let platform_wheel = if let Some(node) = doc.get_node(resolved_nid) {
+                Rc::new(PlatformEventData::new(click_event_payload(node, modifiers)))
+            } else {
+                Rc::new(PlatformEventData::new(Box::new(())))
+            };
+            (dioxus_id, platform_wheel)
+        });
+        (resolved_nid, wheel_dispatch)
+    };
+
+    if let Some((dioxus_id, platform_wheel)) = wheel_dispatch
+        && let Ok(runtime) = std::panic::catch_unwind(dioxus_core::Runtime::current)
+    {
         let dx_wheel = dioxus_core::Event::new(platform_wheel as Rc<dyn Any>, true);
         runtime.handle_event("wheel", dx_wheel, dioxus_id);
     }
@@ -979,5 +1285,183 @@ mod tests {
         assert_eq!(FS_BLOCKED_CLICKS.load(Ordering::SeqCst), 0);
         send_key(&mut dx_doc, legend_btn, "Enter");
         assert_eq!(FS_LEGEND_CLICKS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dispatch_pointer_capture_out_of_bounds_drag_and_lostpointercapture_contract() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static GOT_CAPTURE: AtomicUsize = AtomicUsize::new(0);
+        static MOVE_COUNT: AtomicUsize = AtomicUsize::new(0);
+        static UP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        static LOST_CAPTURE: AtomicUsize = AtomicUsize::new(0);
+        static OUTSIDE_MOVE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        GOT_CAPTURE.store(0, Ordering::SeqCst);
+        MOVE_COUNT.store(0, Ordering::SeqCst);
+        UP_COUNT.store(0, Ordering::SeqCst);
+        LOST_CAPTURE.store(0, Ordering::SeqCst);
+        OUTSIDE_MOVE_COUNT.store(0, Ordering::SeqCst);
+
+        std::thread_local! {
+            static MOUNTED_SLIDER: RefCell<Option<dioxus_native::NodeHandle>> = const { RefCell::new(None) };
+        }
+        MOUNTED_SLIDER.with(|cell| *cell.borrow_mut() = None);
+
+        #[component]
+        fn CaptureApp() -> Element {
+            rsx! {
+                div {
+                    style: "width: 800px; height: 600px; position: relative;",
+                    div {
+                        id: "capture-box",
+                        style: "position: absolute; left: 10px; top: 10px; width: 100px; height: 40px;",
+                        onmounted: move |evt| {
+                            if let Some(h) = evt.downcast::<dioxus_native::NodeHandle>() {
+                                MOUNTED_SLIDER.with(|cell| *cell.borrow_mut() = Some(h.clone()));
+                            }
+                        },
+                        onpointerdown: move |evt: Event<PointerData>| {
+                            let pid = evt.data().pointer_id();
+                            MOUNTED_SLIDER.with(|cell| {
+                                if let Some(h) = cell.borrow().as_ref() {
+                                    let _ = h.set_pointer_capture(pid);
+                                }
+                            });
+                        },
+                        ongotpointercapture: move |_| {
+                            GOT_CAPTURE.fetch_add(1, Ordering::SeqCst);
+                        },
+                        onpointermove: move |_| {
+                            MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+                        },
+                        onpointerup: move |_| {
+                            UP_COUNT.fetch_add(1, Ordering::SeqCst);
+                        },
+                        onlostpointercapture: move |_| {
+                            LOST_CAPTURE.fetch_add(1, Ordering::SeqCst);
+                        },
+                        "Drag"
+                    }
+                    div {
+                        id: "outside-zone",
+                        style: "position: absolute; left: 400px; top: 300px; width: 200px; height: 200px;",
+                        onpointermove: move |_| {
+                            OUTSIDE_MOVE_COUNT.fetch_add(1, Ordering::SeqCst);
+                        },
+                        "Outside"
+                    }
+                }
+            }
+        }
+
+        let vdom = dioxus_core::VirtualDom::new(CaptureApp);
+        let mut dx_doc = dioxus_native::DioxusDocument::new(
+            vdom,
+            blitz_dom::DocumentConfig {
+                viewport: Some(blitz_traits::shell::Viewport::new(800, 600, 1.0, Default::default())),
+                ..Default::default()
+            },
+        );
+        dx_doc.initial_build();
+        dx_doc.inner_mut().resolve(0.0);
+
+        let handle = MOUNTED_SLIDER
+            .with(|cell| cell.borrow().clone())
+            .expect("capture-box must mount");
+        let doc_rc = handle.base_document();
+        let capture_nid = handle.node_id();
+
+        let runtime = dx_doc.vdom.runtime();
+        let _guard = dioxus_core::RuntimeGuard::new(Rc::clone(&runtime));
+
+        // 1. Pointer down inside #capture-box -> queues set_pointer_capture(1) without RefCell panic
+        dispatch_pointer_down_rc(
+            &doc_rc,
+            Some(capture_nid),
+            None,
+            MouseEventButton::Main,
+            Modifiers::empty(),
+        )
+        .unwrap();
+        assert!(handle.has_pointer_capture(1));
+
+        // 2. Pointer move far outside #capture-box bounds (over #outside-zone at 500, 400)
+        dispatch_pointer_move_rc(&doc_rc, None, Some((500.0, 400.0)), Modifiers::empty()).unwrap();
+        assert_eq!(GOT_CAPTURE.load(Ordering::SeqCst), 1);
+        assert_eq!(MOVE_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(OUTSIDE_MOVE_COUNT.load(Ordering::SeqCst), 0);
+
+        // 3. Pointer up outside bounds -> delivered to #capture-box + implicit release + lostpointercapture
+        dispatch_pointer_up_rc(
+            &doc_rc,
+            None,
+            Some((500.0, 400.0)),
+            MouseEventButton::Main,
+            Modifiers::empty(),
+        )
+        .unwrap();
+        assert_eq!(UP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(LOST_CAPTURE.load(Ordering::SeqCst), 1);
+        assert!(!handle.has_pointer_capture(1));
+    }
+
+    #[test]
+    fn dispatch_focus_visible_keyboard_vs_pointer_and_focus_options_contract() {
+        #[component]
+        fn FocusApp() -> Element {
+            rsx! {
+                div {
+                    style: "width: 400px; height: 200px;",
+                    button { id: "btn-a", "Button A" }
+                    button { id: "btn-b", "Button B" }
+                }
+            }
+        }
+
+        let vdom = dioxus_core::VirtualDom::new(FocusApp);
+        let mut dx_doc = dioxus_native::DioxusDocument::new(
+            vdom,
+            blitz_dom::DocumentConfig {
+                viewport: Some(blitz_traits::shell::Viewport::new(400, 200, 1.0, Default::default())),
+                ..Default::default()
+            },
+        );
+        dx_doc.initial_build();
+        dx_doc.inner_mut().resolve(0.0);
+
+        let doc_rc = Rc::clone(&dx_doc.inner);
+        let (btn_a, btn_b) = {
+            let doc = doc_rc.borrow();
+            (
+                doc.query_selector("#btn-a").unwrap().unwrap(),
+                doc.query_selector("#btn-b").unwrap().unwrap(),
+            )
+        };
+
+        let runtime = dx_doc.vdom.runtime();
+        let _guard = dioxus_core::RuntimeGuard::new(Rc::clone(&runtime));
+
+        // 1. Tab focuses #btn-a with keyboard modality -> focus_visible == true
+        let focused = dispatch_key_rc(&doc_rc, None, "Tab", Modifiers::empty()).unwrap();
+        assert_eq!(focused, btn_a);
+        assert!(doc_rc.borrow().is_focus_visible(btn_a));
+
+        // 2. Enter & Space activation on #btn-a preserve keyboard modality -> focus_visible == true
+        dispatch_key_rc(&doc_rc, None, "Enter", Modifiers::empty()).unwrap();
+        assert!(doc_rc.borrow().is_focus_visible(btn_a));
+        dispatch_key_rc(&doc_rc, None, " ", Modifiers::empty()).unwrap();
+        assert!(doc_rc.borrow().is_focus_visible(btn_a));
+
+        // 3. Pointer click on #btn-b focuses #btn-b with pointer modality -> focus_visible == false
+        assert!(dispatch_click_rc(&doc_rc, btn_b, Modifiers::empty()));
+        assert_eq!(doc_rc.borrow().get_focussed_node_id(), Some(btn_b));
+        assert!(!doc_rc.borrow().is_focus_visible(btn_b));
+
+        // 4. Programmatic focus with explicit focus_visible: Some(true) / Some(false)
+        assert!(dispatch_focus_rc(&doc_rc, btn_a, Some(true)));
+        assert!(doc_rc.borrow().is_focus_visible(btn_a));
+        assert!(dispatch_focus_rc(&doc_rc, btn_a, Some(false)));
+        assert!(!doc_rc.borrow().is_focus_visible(btn_a));
     }
 }
