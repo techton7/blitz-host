@@ -13,7 +13,7 @@ blitz-host-protocol = { version = "0.3.0", path = "../blitz-host-protocol" }
 blitz-host-transport = { version = "0.3.0", path = "../blitz-host-transport" }
 blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.0", default-features = false }
 blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.0", default-features = false }
-anyrender = { git = "https://github.com/DioxusLabs/anyrender", branch = "main" }
-anyrender_vello_cpu = { git = "https://github.com/DioxusLabs/anyrender", branch = "main" }
+anyrender = { git = "https://github.com/DioxusLabs/anyrender", rev = "abec906ca8c036e87eee493c99c52e75a893ca72" }
+anyrender_vello_cpu = { git = "https://github.com/DioxusLabs/anyrender", rev = "abec906ca8c036e87eee493c99c52e75a893ca72" }
 peniko = "0.6.0"
 png = "0.17"
