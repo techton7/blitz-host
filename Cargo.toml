@@ -15,12 +15,6 @@ authors = ["Techton <contact@techton.io>"]
 repository = "https://github.com/techton7/blitz-host"
 homepage = "https://github.com/techton7/blitz-host"
 
-[patch.crates-io]
-blitz-shell = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.3" }
-blitz-dom = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.3" }
-blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.3" }
-blitz-paint = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.3" }
-
 [profile.dev.package."*"]
 opt-level = 3
 

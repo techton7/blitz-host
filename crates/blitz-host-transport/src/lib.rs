@@ -21,12 +21,21 @@ mod tests {
     use blitz_host_protocol::{
         ControlRequest, ControlResponse, InspectRequest, InspectResponse, SemanticNode,
     };
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
     #[test]
     fn test_transport_roundtrip_server_client() {
         let (server, rx) = DebugServer::start("test-blitz", "0.1.0").expect("server must start");
         let descriptor = server.descriptor().clone();
+        let wake_count = Arc::new(AtomicUsize::new(0));
+        server.set_waker({
+            let wake_count = wake_count.clone();
+            move || {
+                wake_count.fetch_add(1, Ordering::SeqCst);
+            }
+        });
 
         let server_thread = thread::spawn(move || {
             let req = rx.recv().expect("must receive request");
@@ -79,6 +88,11 @@ mod tests {
         assert_eq!(resp.nodes.len(), 1);
         assert_eq!(resp.nodes[0].tag, "button");
         assert_eq!(resp.nodes[0].dom_id.as_deref(), Some("test-btn"));
+        assert_eq!(
+            wake_count.load(Ordering::SeqCst),
+            1,
+            "incoming IPC must wake the UI-thread service path"
+        );
 
         server_thread.join().unwrap();
         server.shutdown();

@@ -25,7 +25,12 @@ keyboard-types = { version = "0.8", optional = true }
 
 [features]
 default = []
-dioxus-native = ["dep:dioxus", "dep:dioxus-core", "dep:dioxus-native", "dep:keyboard-types"]
+dioxus-native = [
+    "dep:dioxus",
+    "dep:dioxus-core",
+    "dep:dioxus-native",
+    "dep:keyboard-types",
+]
 
 [[bin]]
 name = "blitz-host"

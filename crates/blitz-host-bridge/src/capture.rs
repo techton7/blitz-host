@@ -1,4 +1,4 @@
-use anyrender::PaintScene;
+use anyrender::{AntiAliasing, PaintScene};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::{BaseDocument, NodeId};
 use blitz_host_protocol::{CaptureRequest, CaptureResponse};
@@ -81,6 +81,7 @@ pub fn capture_document_node_png(
                 blitz_dom::util::Color::WHITE,
                 Default::default(),
                 &Rect::new(0.0, 0.0, width as f64, height as f64),
+                AntiAliasing::default(),
             );
 
             // Paint the live Blitz document scene

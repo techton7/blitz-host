@@ -85,9 +85,12 @@ impl BlitzEventHandler for HostDioxusEventHandler {
             | DomEventData::KeyPress(kevent) => Some(Rc::new(PlatformEventData::new(
                 dioxus_native::synthetic_keyboard_event(kevent.clone()),
             )) as Rc<dyn Any>),
-            DomEventData::Input(data) => Some(Rc::new(PlatformEventData::new(
-                dioxus_native::synthetic_form_event(data.value.clone(), vec![]),
-            )) as Rc<dyn Any>),
+            DomEventData::Input(data) => Some(Rc::new(
+                PlatformEventData::new(dioxus_native::synthetic_form_event(
+                    data.value.clone(),
+                    vec![],
+                )),
+            ) as Rc<dyn Any>),
             _ => None,
         };
 
@@ -105,12 +108,8 @@ impl BlitzEventHandler for HostDioxusEventHandler {
             return;
         };
 
-        let dx_event = dioxus_core::Event::new(event_data.clone(), event.bubbles);
+        let dx_event = dioxus_core::Event::new(event_data, event.bubbles);
         runtime.handle_event(event.name(), dx_event.clone(), id);
-        if matches!(&event.data, DomEventData::Input(_)) {
-            let dx_change = dioxus_core::Event::new(event_data, true);
-            runtime.handle_event("change", dx_change, id);
-        }
 
         if !dx_event.default_action_enabled() {
             event_state.prevent_default();
@@ -605,6 +604,64 @@ fn build_key_events(
     (key, combined_mods, key_down, key_up)
 }
 
+#[cfg(target_os = "macos")]
+fn has_focused_text_input(doc: &BaseDocument) -> bool {
+    doc.get_focussed_node_id()
+        .and_then(|id| doc.get_node(id))
+        .and_then(|n| n.element_data())
+        .is_some_and(|el| el.text_input_data().is_some())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_text_input_standard_keybinding(key: &Key, mods: Modifiers) -> Option<&'static str> {
+    if mods.intersects(Modifiers::META | Modifiers::CONTROL) {
+        return None;
+    }
+    let alt = mods.contains(Modifiers::ALT);
+    let shift = mods.contains(Modifiers::SHIFT);
+    match key {
+        Key::Named(NamedKey::Backspace) => {
+            if alt {
+                Some("deleteWordBackward:")
+            } else {
+                Some("deleteBackward:")
+            }
+        }
+        Key::Named(NamedKey::Delete) => {
+            if alt {
+                Some("deleteWordForward:")
+            } else {
+                Some("deleteForward:")
+            }
+        }
+        Key::Named(NamedKey::ArrowLeft) => match (alt, shift) {
+            (true, true) => Some("moveWordLeftAndModifySelection:"),
+            (true, false) => Some("moveWordLeft:"),
+            (false, true) => Some("moveLeftAndModifySelection:"),
+            (false, false) => Some("moveLeft:"),
+        },
+        Key::Named(NamedKey::ArrowRight) => match (alt, shift) {
+            (true, true) => Some("moveWordRightAndModifySelection:"),
+            (true, false) => Some("moveWordRight:"),
+            (false, true) => Some("moveRightAndModifySelection:"),
+            (false, false) => Some("moveRight:"),
+        },
+        Key::Named(NamedKey::ArrowUp) => match (alt, shift) {
+            (true, true) => Some("moveToBeginningOfParagraphAndModifySelection:"),
+            (true, false) => Some("moveToBeginningOfParagraph:"),
+            (false, true) => Some("moveUpAndModifySelection:"),
+            (false, false) => Some("moveUp:"),
+        },
+        Key::Named(NamedKey::ArrowDown) => match (alt, shift) {
+            (true, true) => Some("moveToEndOfParagraphAndModifySelection:"),
+            (true, false) => Some("moveToEndOfParagraph:"),
+            (false, true) => Some("moveDownAndModifySelection:"),
+            (false, false) => Some("moveDown:"),
+        },
+        _ => None,
+    }
+}
+
 /// Dispatch a keyboard action on a target node in `doc`.
 /// Drives real Blitz DOM `EventDriver` keyboard handling, `:focus-visible` modality,
 /// HTML Enter/Space activation (`#839`), Tab traversal, Escape focus clearing, and text editing.
@@ -614,7 +671,9 @@ pub fn dispatch_key(
     key_str: &str,
     modifiers: Modifiers,
 ) -> Result<NodeId, String> {
-    let (key, _combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
+    let (key, combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
+    #[cfg(not(target_os = "macos"))]
+    let _ = combined_mods;
 
     let target_node_id = match node_id {
         Some(nid) => {
@@ -628,9 +687,19 @@ pub fn dispatch_key(
             .unwrap_or_else(|| doc.root_node().id),
     };
     let old_focus = doc.get_focussed_node_id();
+    #[cfg(target_os = "macos")]
+    let apple_cmd = if has_focused_text_input(doc) {
+        macos_text_input_standard_keybinding(&key, combined_mods)
+    } else {
+        None
+    };
 
     {
         let mut driver = EventDriver::new(doc, HostDioxusEventHandler { doc_handle: None });
+        #[cfg(target_os = "macos")]
+        if let Some(cmd) = apple_cmd {
+            driver.handle_ui_event(UiEvent::AppleStandardKeybinding(SmolStr::new_static(cmd)));
+        }
         driver.handle_ui_event(UiEvent::KeyDown(key_down));
         driver.handle_ui_event(UiEvent::KeyUp(key_up));
     }
@@ -661,9 +730,11 @@ pub fn dispatch_key_rc(
     key_str: &str,
     modifiers: Modifiers,
 ) -> Result<NodeId, String> {
-    let (key, _combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
+    let (key, combined_mods, key_down, key_up) = build_key_events(key_str, modifiers);
+    #[cfg(not(target_os = "macos"))]
+    let _ = combined_mods;
 
-    let (target_node_id, old_focus) = {
+    let (target_node_id, old_focus, apple_cmd) = {
         let mut doc = doc_rc.borrow_mut();
         let target_node_id = match node_id {
             Some(nid) => {
@@ -677,7 +748,15 @@ pub fn dispatch_key_rc(
                 .unwrap_or_else(|| doc.root_node().id),
         };
         let old_focus = doc.get_focussed_node_id();
-        (target_node_id, old_focus)
+        #[cfg(target_os = "macos")]
+        let apple_cmd = if has_focused_text_input(&doc) {
+            macos_text_input_standard_keybinding(&key, combined_mods)
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "macos"))]
+        let apple_cmd: Option<&'static str> = None;
+        (target_node_id, old_focus, apple_cmd)
     };
 
     {
@@ -688,6 +767,12 @@ pub fn dispatch_key_rc(
                 doc_handle: Some(Rc::downgrade(doc_rc)),
             },
         );
+        #[cfg(target_os = "macos")]
+        if let Some(cmd) = apple_cmd {
+            driver.handle_ui_event(UiEvent::AppleStandardKeybinding(SmolStr::new_static(cmd)));
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = apple_cmd;
         driver.handle_ui_event(UiEvent::KeyDown(key_down));
         driver.handle_ui_event(UiEvent::KeyUp(key_up));
     }
@@ -1463,5 +1548,74 @@ mod tests {
         assert!(doc_rc.borrow().is_focus_visible(btn_a));
         assert!(dispatch_focus_rc(&doc_rc, btn_a, Some(false)));
         assert!(!doc_rc.borrow().is_focus_visible(btn_a));
+    }
+
+    #[test]
+    fn dispatch_key_text_input_navigation_and_editing_single_step_contract() {
+        #[component]
+        fn InputApp() -> Element {
+            let mut text = use_signal(|| String::from("abcd"));
+            rsx! {
+                div {
+                    style: "width: 400px; height: 100px;",
+                    input {
+                        id: "txt",
+                        r#type: "text",
+                        value: "{text}",
+                        oninput: move |evt| text.set(evt.value()),
+                    }
+                }
+            }
+        }
+
+        let vdom = dioxus_core::VirtualDom::new(InputApp);
+        let mut dx_doc = dioxus_native::DioxusDocument::new(
+            vdom,
+            blitz_dom::DocumentConfig {
+                viewport: Some(blitz_traits::shell::Viewport::new(400, 100, 1.0, Default::default())),
+                ..Default::default()
+            },
+        );
+        dx_doc.initial_build();
+        dx_doc.inner_mut().resolve(0.0);
+
+        let doc_rc = Rc::clone(&dx_doc.inner);
+        let input_id = doc_rc.borrow().query_selector("#txt").unwrap().unwrap();
+
+        let read_editor_text = |doc_rc: &Rc<RefCell<BaseDocument>>| -> String {
+            doc_rc
+                .borrow()
+                .get_node(input_id)
+                .unwrap()
+                .element_data()
+                .unwrap()
+                .text_input_data()
+                .unwrap()
+                .editor
+                .text()
+                .to_string()
+        };
+
+        let runtime = dx_doc.vdom.runtime();
+        let _guard = dioxus_core::RuntimeGuard::new(Rc::clone(&runtime));
+
+        // Move caret to end of "abcd"
+        #[cfg(target_os = "macos")]
+        dispatch_key_rc(&doc_rc, Some(input_id), "cmd+ArrowRight", Modifiers::empty()).unwrap();
+        #[cfg(not(target_os = "macos"))]
+        dispatch_key_rc(&doc_rc, Some(input_id), "End", Modifiers::empty()).unwrap();
+
+        // Backspace deletes exactly 1 character ("abc")
+        dispatch_key_rc(&doc_rc, None, "Backspace", Modifiers::empty()).unwrap();
+        assert_eq!(read_editor_text(&doc_rc), "abc");
+
+        // ArrowLeft moves 1 character left (between 'b' and 'c'), typing 'X' yields "abXc"
+        dispatch_key_rc(&doc_rc, None, "ArrowLeft", Modifiers::empty()).unwrap();
+        dispatch_key_rc(&doc_rc, None, "X", Modifiers::empty()).unwrap();
+        assert_eq!(read_editor_text(&doc_rc), "abXc");
+
+        // Delete removes 'c' -> "abX"
+        dispatch_key_rc(&doc_rc, None, "Delete", Modifiers::empty()).unwrap();
+        assert_eq!(read_editor_text(&doc_rc), "abX");
     }
 }
