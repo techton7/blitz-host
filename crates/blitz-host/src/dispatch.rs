@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::str::FromStr;
 
+use ::keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
 use blitz_dom::{
     BaseDocument, Document, EventDriver, EventHandler as BlitzEventHandler, FocusOptions,
     FocusSource, Node, NodeId,
@@ -16,11 +17,11 @@ use blitz_dom::{
 use blitz_traits::SmolStr;
 pub use blitz_traits::events::MouseEventButton;
 use blitz_traits::events::{
-    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, DomEvent,
-    DomEventData, EventState, KeyState, MouseEventButtons, PointerCoords, UiEvent,
+    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent,
+    BlitzWheelPhase, BlitzWheelSource, DomEvent, DomEventData, EventState, KeyState,
+    MouseEventButtons, PointerCoords, UiEvent,
 };
 use dioxus_native::prelude::*;
-use ::keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
 
 std::thread_local! {
     static HELD_MOUSE_BUTTONS: Cell<MouseEventButtons> = const { Cell::new(MouseEventButtons::None) };
@@ -85,12 +86,9 @@ impl BlitzEventHandler for HostDioxusEventHandler {
             | DomEventData::KeyPress(kevent) => Some(Rc::new(PlatformEventData::new(
                 dioxus_native::synthetic_keyboard_event(kevent.clone()),
             )) as Rc<dyn Any>),
-            DomEventData::Input(data) => Some(Rc::new(
-                PlatformEventData::new(dioxus_native::synthetic_form_event(
-                    data.value.clone(),
-                    vec![],
-                )),
-            ) as Rc<dyn Any>),
+            DomEventData::Input(data) => Some(Rc::new(PlatformEventData::new(
+                dioxus_native::synthetic_form_event(data.value.clone(), vec![]),
+            )) as Rc<dyn Any>),
             _ => None,
         };
 
@@ -295,7 +293,8 @@ fn resolve_press_focus_target(doc: &BaseDocument, start_id: NodeId) -> PressFocu
             break;
         };
         if let Some(el) = node.element_data() {
-            let has_tabindex = attr_val(el, "tabindex").is_some_and(|v| v.trim().parse::<i32>().is_ok());
+            let has_tabindex =
+                attr_val(el, "tabindex").is_some_and(|v| v.trim().parse::<i32>().is_ok());
             if el.is_focussable || has_tabindex {
                 return PressFocusResolution::Focus(node_id);
             }
@@ -545,11 +544,7 @@ pub fn dispatch_input(doc: &mut BaseDocument, node_id: NodeId, value: &str) -> b
 }
 
 /// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_input`].
-pub fn dispatch_input_rc(
-    doc_rc: &Rc<RefCell<BaseDocument>>,
-    node_id: NodeId,
-    value: &str,
-) -> bool {
+pub fn dispatch_input_rc(doc_rc: &Rc<RefCell<BaseDocument>>, node_id: NodeId, value: &str) -> bool {
     let dioxus_id = {
         let mut doc = doc_rc.borrow_mut();
         let Some((dioxus_id, target_node_id)) = find_dioxus_target(&doc, node_id) else {
@@ -1104,6 +1099,8 @@ pub fn dispatch_wheel(
 
     let wheel_event = BlitzWheelEvent {
         delta: BlitzWheelDelta::Pixels(delta_x, delta_y),
+        phase: BlitzWheelPhase::Moved,
+        source: BlitzWheelSource::Wheel,
         coords: PointerCoords {
             page_x: x,
             page_y: y,
@@ -1165,6 +1162,8 @@ pub fn dispatch_wheel_rc(
 
         let wheel_event = BlitzWheelEvent {
             delta: BlitzWheelDelta::Pixels(delta_x, delta_y),
+            phase: BlitzWheelPhase::Moved,
+            source: BlitzWheelSource::Wheel,
             coords: PointerCoords {
                 page_x: x,
                 page_y: y,
@@ -1444,7 +1443,12 @@ mod tests {
         let mut dx_doc = dioxus_native::DioxusDocument::new(
             vdom,
             blitz_dom::DocumentConfig {
-                viewport: Some(blitz_traits::shell::Viewport::new(800, 600, 1.0, Default::default())),
+                viewport: Some(blitz_traits::shell::Viewport::new(
+                    800,
+                    600,
+                    1.0,
+                    Default::default(),
+                )),
                 ..Default::default()
             },
         );
@@ -1508,7 +1512,12 @@ mod tests {
         let mut dx_doc = dioxus_native::DioxusDocument::new(
             vdom,
             blitz_dom::DocumentConfig {
-                viewport: Some(blitz_traits::shell::Viewport::new(400, 200, 1.0, Default::default())),
+                viewport: Some(blitz_traits::shell::Viewport::new(
+                    400,
+                    200,
+                    1.0,
+                    Default::default(),
+                )),
                 ..Default::default()
             },
         );
@@ -1572,7 +1581,12 @@ mod tests {
         let mut dx_doc = dioxus_native::DioxusDocument::new(
             vdom,
             blitz_dom::DocumentConfig {
-                viewport: Some(blitz_traits::shell::Viewport::new(400, 100, 1.0, Default::default())),
+                viewport: Some(blitz_traits::shell::Viewport::new(
+                    400,
+                    100,
+                    1.0,
+                    Default::default(),
+                )),
                 ..Default::default()
             },
         );
@@ -1601,7 +1615,13 @@ mod tests {
 
         // Move caret to end of "abcd"
         #[cfg(target_os = "macos")]
-        dispatch_key_rc(&doc_rc, Some(input_id), "cmd+ArrowRight", Modifiers::empty()).unwrap();
+        dispatch_key_rc(
+            &doc_rc,
+            Some(input_id),
+            "cmd+ArrowRight",
+            Modifiers::empty(),
+        )
+        .unwrap();
         #[cfg(not(target_os = "macos"))]
         dispatch_key_rc(&doc_rc, Some(input_id), "End", Modifiers::empty()).unwrap();
 
