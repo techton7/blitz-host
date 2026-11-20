@@ -478,6 +478,7 @@ dependencies = [
  "blitz-host-protocol",
  "blitz-host-transport",
  "blitz-paint",
+ "blitz-traits",
  "peniko",
  "png 0.17.16",
 ]

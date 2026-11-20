@@ -12,7 +12,7 @@ use std::str::FromStr;
 use ::keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
 use blitz_dom::{
     BaseDocument, Document, EventDriver, EventHandler as BlitzEventHandler, FocusOptions,
-    FocusSource, Node, NodeId,
+    FocusSource, Node, NodeId, ScrollBehavior, ScrollLogicalPosition,
 };
 use blitz_traits::SmolStr;
 pub use blitz_traits::events::MouseEventButton;
@@ -517,6 +517,27 @@ pub fn dispatch_focus_rc(
         runtime.handle_event("focusin", dx_focusin, dioxus_id);
     }
     true
+}
+
+/// Scroll `node_id` into the viewport (nearest alignment, instant) and request a redraw.
+pub fn dispatch_scroll_into_view(doc: &mut BaseDocument, node_id: NodeId) -> bool {
+    if doc.get_node(node_id).is_none() {
+        return false;
+    }
+    doc.scroll_into_view(
+        node_id,
+        ScrollBehavior::Instant,
+        ScrollLogicalPosition::Nearest,
+        ScrollLogicalPosition::Nearest,
+    );
+    doc.shell_provider.request_redraw();
+    true
+}
+
+/// Borrow-safe `Rc<RefCell<BaseDocument>>` variant of [`dispatch_scroll_into_view`].
+pub fn dispatch_scroll_into_view_rc(doc_rc: &Rc<RefCell<BaseDocument>>, node_id: NodeId) -> bool {
+    let mut doc = doc_rc.borrow_mut();
+    dispatch_scroll_into_view(&mut doc, node_id)
 }
 
 /// Dispatch an input/value change on a target node in `doc`.
@@ -1203,6 +1224,50 @@ pub fn dispatch_wheel_rc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dispatch_scroll_into_view_moves_viewport_and_rejects_missing_node() {
+        use blitz_dom::{Attribute, DocumentConfig, QualName, local_name, ns};
+        use blitz_traits::shell::{ColorScheme, Viewport};
+
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        let root_id = doc.root_node().id;
+        let target = {
+            let mut m = doc.mutate();
+            let mk = |m: &mut blitz_dom::DocumentMutator<'_>, style: &str| {
+                m.create_element(
+                    QualName::new(None, ns!(html), local_name!("div")),
+                    vec![Attribute {
+                        name: QualName::new(None, ns!(), local_name!("style")),
+                        value: style.to_string(),
+                    }],
+                )
+            };
+            let spacer = mk(&mut m, "display:block;height:1000px;");
+            let target = mk(&mut m, "display:block;height:80px;");
+            let html =
+                m.create_element(QualName::new(None, ns!(html), local_name!("html")), vec![]);
+            let body =
+                m.create_element(QualName::new(None, ns!(html), local_name!("body")), vec![]);
+            m.append_children(root_id, &[html]);
+            m.append_children(html, &[body]);
+            m.append_children(body, &[spacer, target]);
+            target
+        };
+        doc.resolve(0.0);
+        assert_eq!(doc.viewport_scroll().y, 0.0);
+
+        assert!(dispatch_scroll_into_view(&mut doc, target));
+        assert!(doc.viewport_scroll().y > 0.0);
+
+        assert!(!dispatch_scroll_into_view(
+            &mut doc,
+            NodeId::from_u64(u32::MAX as u64 - 1)
+        ));
+    }
 
     #[test]
     fn test_parse_key_str() {

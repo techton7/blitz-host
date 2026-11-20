@@ -273,7 +273,10 @@ mod tests {
         assert_eq!(serviced.responded, 1);
         assert_eq!(serviced.serviced(), 1);
         assert_eq!(serviced.pending_settles, 0);
-        assert!(serviced.needs_redraw, "Act request must set needs_redraw = true");
+        assert!(
+            serviced.needs_redraw,
+            "Act request must set needs_redraw = true"
+        );
 
         let resp = act_resp_rx.recv().unwrap();
         assert!(matches!(resp, ControlResponse::ActionSuccess(_)));
@@ -300,7 +303,10 @@ mod tests {
         assert_eq!(serviced.responded, 1);
         assert_eq!(serviced.serviced(), 1);
         assert_eq!(serviced.pending_settles, 0);
-        assert!(!serviced.needs_redraw, "Inspect request must not require redraw");
+        assert!(
+            !serviced.needs_redraw,
+            "Inspect request must not require redraw"
+        );
 
         let resp = inspect_resp_rx.recv().unwrap();
         assert!(matches!(resp, ControlResponse::InspectSuccess(_)));

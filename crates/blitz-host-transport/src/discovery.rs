@@ -49,20 +49,15 @@ pub fn write_descriptor(descriptor: &HostDescriptor) -> io::Result<PathBuf> {
 }
 
 /// Selection criteria for targeting an active Blitz host.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TargetSelector {
     /// Auto-discover the latest reachable host.
+    #[default]
     Auto,
     /// Connect to a host running with a specific OS process ID.
     Pid(u32),
     /// Connect to a host at an explicit descriptor or socket path.
     ExplicitPath(PathBuf),
-}
-
-impl Default for TargetSelector {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Enumerate all currently advertised Blitz host descriptors, sorted newest first.
@@ -78,18 +73,18 @@ pub fn list_hosts() -> io::Result<Vec<HostDescriptor>> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "json") {
-            if let Ok(metadata) = path.metadata() {
-                let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                if let Ok(desc) = read_descriptor(&path) {
-                    descriptors.push((modified, path, desc));
-                }
+        if path.extension().is_some_and(|ext| ext == "json")
+            && let Ok(metadata) = path.metadata()
+        {
+            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            if let Ok(desc) = read_descriptor(&path) {
+                descriptors.push((modified, path, desc));
             }
         }
     }
 
     // Sort newest first
-    descriptors.sort_by(|a, b| b.0.cmp(&a.0));
+    descriptors.sort_by_key(|a| std::cmp::Reverse(a.0));
 
     let mut reachable_hosts = Vec::new();
     for (_modified, path, desc) in descriptors {

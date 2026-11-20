@@ -176,10 +176,10 @@ impl DebugServer {
             return;
         }
         // Connect dummy stream to unblock listener.incoming()
-        if self.thread.is_some() {
-            if let Ok(name) = socket_name_from_str(&self.descriptor.socket_path) {
-                let _ = Stream::connect(name);
-            }
+        if self.thread.is_some()
+            && let Ok(name) = socket_name_from_str(&self.descriptor.socket_path)
+        {
+            let _ = Stream::connect(name);
         }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();

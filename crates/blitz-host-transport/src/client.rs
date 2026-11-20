@@ -190,6 +190,25 @@ impl DebugClient {
         })
     }
 
+    /// Scroll an element (node ID or CSS selector) into view on a targeted window.
+    pub fn scroll_into_view(
+        &mut self,
+        window_id: Option<u64>,
+        target: impl Into<ElementTarget>,
+    ) -> io::Result<ActionResponse> {
+        let target = target.into();
+        let (node_id, selector) = match &target {
+            ElementTarget::Id(id) => (Some(*id), None),
+            ElementTarget::Selector(sel) => (None, Some(sel.clone())),
+        };
+        self.act(ActionRequest::ScrollIntoView {
+            window_id,
+            node_id,
+            selector,
+            target: Some(target),
+        })
+    }
+
     /// Convenience helper to focus a specific node by ID on the default/fallback window.
     pub fn focus(&mut self, node_id: u64) -> io::Result<ActionResponse> {
         self.focus_window(None, node_id)

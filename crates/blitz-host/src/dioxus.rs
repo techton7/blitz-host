@@ -58,11 +58,7 @@ fn service_turn(
                 )
             },
             |d, nid, val| {
-                crate::dispatch::dispatch_input_rc(
-                    d,
-                    blitz_dom::NodeId::from_u64(nid),
-                    val,
-                )
+                crate::dispatch::dispatch_input_rc(d, blitz_dom::NodeId::from_u64(nid), val)
             },
             |d, nid, key, mods| {
                 let mut kb_mods = keyboard_types::Modifiers::empty();

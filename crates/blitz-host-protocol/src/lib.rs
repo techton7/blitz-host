@@ -194,6 +194,18 @@ pub struct InspectResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
 pub enum ActionRequest {
+    /// Scroll a target node into the viewport (nearest alignment, instant).
+    ScrollIntoView {
+        /// Optional target window handle (falls back to primary window if None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selector: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<ElementTarget>,
+    },
     /// Synthetic click on a node or selector.
     Click {
         /// Optional target window handle (falls back to primary window if None).
@@ -363,7 +375,13 @@ impl ActionRequest {
     /// Resolves the intended target if specified either via `target`, `selector`, or `node_id`.
     pub fn target(&self) -> Option<ElementTarget> {
         match self {
-            Self::Click {
+            Self::ScrollIntoView {
+                target,
+                selector,
+                node_id,
+                ..
+            }
+            | Self::Click {
                 target,
                 selector,
                 node_id,
@@ -425,7 +443,8 @@ impl ActionRequest {
     /// Access raw `node_id` field if directly specified.
     pub fn raw_node_id(&self) -> Option<u64> {
         match self {
-            Self::Click { node_id, .. }
+            Self::ScrollIntoView { node_id, .. }
+            | Self::Click { node_id, .. }
             | Self::Focus { node_id, .. }
             | Self::SetValue { node_id, .. }
             | Self::Key { node_id, .. }
@@ -439,7 +458,8 @@ impl ActionRequest {
     /// Access raw `selector` field if directly specified.
     pub fn raw_selector(&self) -> Option<&str> {
         match self {
-            Self::Click { selector, .. }
+            Self::ScrollIntoView { selector, .. }
+            | Self::Click { selector, .. }
             | Self::Focus { selector, .. }
             | Self::SetValue { selector, .. }
             | Self::Key { selector, .. }
@@ -988,5 +1008,24 @@ mod tests {
         assert!(!cap_resp_json.contains("dataBase64"));
         let cap_resp_parsed: ControlResponse = serde_json::from_str(&cap_resp_json).unwrap();
         assert_eq!(cap_resp, cap_resp_parsed);
+    }
+
+    #[test]
+    fn scroll_into_view_action_json_roundtrip() {
+        let req = ControlRequest::Act(ActionRequest::ScrollIntoView {
+            window_id: Some(3),
+            node_id: None,
+            selector: Some("#below".into()),
+            target: None,
+        });
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"action\":\"scrollIntoView\""));
+        let parsed: ControlRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, parsed);
+        let ControlRequest::Act(act) = parsed else {
+            panic!("expected Act");
+        };
+        assert_eq!(act.raw_selector(), Some("#below"));
+        assert_eq!(act.target(), Some(ElementTarget::from("#below")));
     }
 }
