@@ -206,6 +206,20 @@ fn service_turn(
     })
 }
 
+#[cfg(target_os = "macos")]
+fn wake_macos_main_runloop() {
+    unsafe extern "C" {
+        fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
+        fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
+    }
+    unsafe {
+        let main_rl = CFRunLoopGetMain();
+        if !main_rl.is_null() {
+            CFRunLoopWakeUp(main_rl);
+        }
+    }
+}
+
 /// Root wrapper component that automatically injects `blitz-host` debug control
 /// into a Dioxus Native application.
 ///
@@ -245,10 +259,14 @@ pub fn BlitzHost(children: Element) -> Element {
         // every queued request is serviced on the UI thread, even when the window is hidden.
         HostControl::set_global_waker(move || {
             window_for_wake.request_redraw();
+            #[cfg(target_os = "macos")]
+            wake_macos_main_runloop();
         });
 
         // Requests that arrived before mounting still need an actual native event-loop turn.
         window_for_redraw.request_redraw();
+        #[cfg(target_os = "macos")]
+        wake_macos_main_runloop();
     });
 
     use_drop(|| {
