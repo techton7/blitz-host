@@ -36,9 +36,6 @@ fn service_turn(
     doc_rc: &Rc<std::cell::RefCell<blitz_dom::BaseDocument>>,
     frame: u64,
 ) -> ServiceResult {
-    {
-        doc_rc.borrow_mut().resolve(0.0);
-    }
     HostControl::service_global_frame_rc(doc_rc, frame, |action_req, doc_rc| {
         HostControl::handle_action_rc(
             action_req,
