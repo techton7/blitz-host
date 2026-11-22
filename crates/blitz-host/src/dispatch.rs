@@ -86,9 +86,33 @@ impl BlitzEventHandler for HostDioxusEventHandler {
             | DomEventData::KeyPress(kevent) => Some(Rc::new(PlatformEventData::new(
                 dioxus_native::synthetic_keyboard_event(kevent.clone()),
             )) as Rc<dyn Any>),
-            DomEventData::Input(data) => Some(Rc::new(PlatformEventData::new(
-                dioxus_native::synthetic_form_event(data.value.clone(), vec![]),
-            )) as Rc<dyn Any>),
+            DomEventData::Input(data) | DomEventData::Change(data) => Some(Rc::new(
+                PlatformEventData::new(dioxus_native::synthetic_form_event(
+                    data.value.clone(),
+                    vec![],
+                )),
+            ) as Rc<dyn Any>),
+            DomEventData::Submit(data) => {
+                let values = data
+                    .entries
+                    .iter()
+                    .map(|blitz_traits::net::Entry { name, value }| {
+                        let form_value = match value {
+                            blitz_traits::net::EntryValue::String(s) => {
+                                dioxus::prelude::FormValue::Text(s.clone())
+                            }
+                            blitz_traits::net::EntryValue::File(_)
+                            | blitz_traits::net::EntryValue::EmptyFile => {
+                                dioxus::prelude::FormValue::File(None)
+                            }
+                        };
+                        (name.clone(), form_value)
+                    })
+                    .collect::<Vec<_>>();
+                Some(Rc::new(PlatformEventData::new(
+                    dioxus_native::synthetic_form_event(String::new(), values),
+                )) as Rc<dyn Any>)
+            }
             _ => None,
         };
 
