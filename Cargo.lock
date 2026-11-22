@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.2.1"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "accesskit",
  "accesskit_ios",
@@ -405,7 +405,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -416,7 +416,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5)",
+ "debug_timer 0.1.3 (git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6)",
  "euclid",
  "html-escape",
  "icu_casemap",
@@ -455,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "blitz-dom",
  "blitz-host-bridge",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-bridge"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-protocol"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "blitz-host-transport"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "blitz-host-protocol",
  "interprocess",
@@ -507,7 +507,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -518,7 +518,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -530,7 +530,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -552,7 +552,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -574,7 +574,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -1089,7 +1089,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 
 [[package]]
 name = "derive_more"
@@ -1348,7 +1348,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "android-activity",
  "anyrender",
@@ -1388,7 +1388,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native-dom"
 version = "0.7.0"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -5066,7 +5066,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.4"
-source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.5#a987c41857ca96d881ac2c18b5dfc0d795a0b9b3"
+source = "git+https://github.com/techton7/blitz.git?tag=techton-main-v0.3.6#af751d6f7cbcc0cd1e0490f799643a54412924f9"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",
