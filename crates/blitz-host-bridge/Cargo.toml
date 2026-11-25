@@ -19,4 +19,4 @@ peniko = "0.6.0"
 png = "0.17"
 
 [dev-dependencies]
-blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.3", default-features = false }
+blitz-traits = { git = "https://github.com/techton7/blitz.git", tag = "techton-main-v0.3.8", default-features = false }
