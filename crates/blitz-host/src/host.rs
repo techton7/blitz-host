@@ -28,15 +28,15 @@ impl HostControl {
         if std::env::args().any(|arg| arg == "--no-debug-control") {
             return false;
         }
-        if let Ok(val) = std::env::var("BLITZ_DEBUG_CONTROL") {
-            if val == "0" || val.eq_ignore_ascii_case("false") {
-                return false;
-            }
+        if let Ok(val) = std::env::var("BLITZ_DEBUG_CONTROL")
+            && (val == "0" || val.eq_ignore_ascii_case("false"))
+        {
+            return false;
         }
-        if let Ok(val) = std::env::var("BLITZ_HOST_DISABLED") {
-            if val == "1" || val.eq_ignore_ascii_case("true") {
-                return false;
-            }
+        if let Ok(val) = std::env::var("BLITZ_HOST_DISABLED")
+            && (val == "1" || val.eq_ignore_ascii_case("true"))
+        {
+            return false;
         }
         true
     }
@@ -114,10 +114,10 @@ impl HostControl {
 
     /// Update primary window and document metadata in the process-global singleton if active.
     pub fn set_global_primary_window(window_id: Option<u64>, document_id: Option<usize>) {
-        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
-            if let Some(ctrl) = guard.as_mut() {
-                ctrl.set_primary_window(window_id, document_id);
-            }
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock()
+            && let Some(ctrl) = guard.as_mut()
+        {
+            ctrl.set_primary_window(window_id, document_id);
         }
     }
 
@@ -133,19 +133,19 @@ impl HostControl {
 
     /// Register or replace the event loop waker callback on the process-global singleton if active.
     pub fn set_global_waker(wake: impl Fn() + Send + Sync + 'static) {
-        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
-            if let Some(ctrl) = guard.as_mut() {
-                ctrl.set_waker(wake);
-            }
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock()
+            && let Some(ctrl) = guard.as_mut()
+        {
+            ctrl.set_waker(wake);
         }
     }
 
     /// Clear the event loop waker callback on the process-global singleton if active.
     pub fn clear_global_waker() {
-        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
-            if let Some(ctrl) = guard.as_mut() {
-                ctrl.clear_waker();
-            }
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock()
+            && let Some(ctrl) = guard.as_mut()
+        {
+            ctrl.clear_waker();
         }
     }
 
@@ -178,10 +178,10 @@ impl HostControl {
     where
         F: FnMut(&ActionRequest, &mut BaseDocument) -> Result<ActionResponse, String>,
     {
-        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
-            if let Some(ctrl) = guard.as_mut() {
-                return ctrl.poll_and_service(doc, current_frame, dispatch_action);
-            }
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock()
+            && let Some(ctrl) = guard.as_mut()
+        {
+            return ctrl.poll_and_service(doc, current_frame, dispatch_action);
         }
         ServiceResult::default()
     }
@@ -221,10 +221,10 @@ impl HostControl {
             &std::rc::Rc<std::cell::RefCell<BaseDocument>>,
         ) -> Result<ActionResponse, String>,
     {
-        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock() {
-            if let Some(ctrl) = guard.as_mut() {
-                return ctrl.poll_and_service_rc(doc_rc, current_frame, dispatch_action);
-            }
+        if let Ok(mut guard) = GLOBAL_HOST_CONTROL.lock()
+            && let Some(ctrl) = guard.as_mut()
+        {
+            return ctrl.poll_and_service_rc(doc_rc, current_frame, dispatch_action);
         }
         ServiceResult::default()
     }
@@ -293,6 +293,25 @@ impl HostControl {
         };
 
         match action_req {
+            ActionRequest::ScrollIntoView { .. } => {
+                let node_id = resolved_target.ok_or_else(|| {
+                    "ScrollIntoView requires a target node or selector".to_string()
+                })?;
+                let nid = blitz_dom::NodeId::from_u64(node_id);
+                #[cfg(feature = "dioxus-native")]
+                let ok = crate::dispatch::dispatch_scroll_into_view_rc(doc_rc, nid);
+                #[cfg(not(feature = "dioxus-native"))]
+                let ok = scroll_into_view_raw(&mut doc_rc.borrow_mut(), nid);
+                if !ok {
+                    return Err(format!("Node #{node_id} not found in document"));
+                }
+                Ok(ActionResponse {
+                    success: true,
+                    node_id,
+                    handled: None,
+                    message: Some(format!("Scrolled node #{node_id} into view")),
+                })
+            }
             ActionRequest::Click { .. } => {
                 let node_id = resolved_target
                     .ok_or_else(|| "Click requires a target node or selector".to_string())?;
@@ -479,6 +498,7 @@ impl HostControl {
     }
 
     /// Dispatches UI actions (Click, Focus, SetValue, Key, MouseMove, MouseDown, MouseUp, Wheel) using provided closures.
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_action<C, F, S, K, M, MD, MU, W>(
         action_req: &ActionRequest,
         base_doc: &mut BaseDocument,
@@ -538,6 +558,25 @@ impl HostControl {
         )?;
 
         match action_req {
+            ActionRequest::ScrollIntoView { .. } => {
+                let node_id = resolved_target.ok_or_else(|| {
+                    "ScrollIntoView requires a target node or selector".to_string()
+                })?;
+                let nid = blitz_dom::NodeId::from_u64(node_id);
+                #[cfg(feature = "dioxus-native")]
+                let ok = crate::dispatch::dispatch_scroll_into_view(base_doc, nid);
+                #[cfg(not(feature = "dioxus-native"))]
+                let ok = scroll_into_view_raw(base_doc, nid);
+                if !ok {
+                    return Err(format!("Node #{node_id} not found in document"));
+                }
+                Ok(ActionResponse {
+                    success: true,
+                    node_id,
+                    handled: None,
+                    message: Some(format!("Scrolled node #{node_id} into view")),
+                })
+            }
             ActionRequest::Click { .. } => {
                 let node_id = resolved_target
                     .ok_or_else(|| "Click requires a target node or selector".to_string())?;
@@ -793,11 +832,26 @@ pub fn init_if_debug_default() -> bool {
     init_default()
 }
 
+#[cfg(not(feature = "dioxus-native"))]
+fn scroll_into_view_raw(doc: &mut BaseDocument, node_id: blitz_dom::NodeId) -> bool {
+    if doc.get_node(node_id).is_none() {
+        return false;
+    }
+    doc.scroll_into_view(
+        node_id,
+        blitz_dom::ScrollBehavior::Instant,
+        blitz_dom::ScrollLogicalPosition::Nearest,
+        blitz_dom::ScrollLogicalPosition::Nearest,
+    );
+    doc.shell_provider.request_redraw();
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn test_set_and_clear_waker_on_instance() {

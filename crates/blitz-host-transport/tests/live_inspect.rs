@@ -53,6 +53,7 @@ fn resolve_native_runner_bin() -> Option<std::path::PathBuf> {
         manifest_dir.join("../../target/debug/oxidase-native-runner"),
     ];
 
+    #[allow(clippy::manual_find)]
     for candidate in candidates {
         if candidate.exists() {
             return Some(candidate);
@@ -93,20 +94,16 @@ fn test_live_native_runner_attach_and_inspect() {
     if let Some(stdout) = child.stdout.take() {
         thread::spawn(move || {
             use std::io::{BufRead, BufReader};
-            for line in BufReader::new(stdout).lines() {
-                if let Ok(l) = line {
-                    println!("[RUNNER stdout] {l}");
-                }
+            for l in BufReader::new(stdout).lines().map_while(Result::ok) {
+                println!("[RUNNER stdout] {l}");
             }
         });
     }
     if let Some(stderr) = child.stderr.take() {
         thread::spawn(move || {
             use std::io::{BufRead, BufReader};
-            for line in BufReader::new(stderr).lines() {
-                if let Ok(l) = line {
-                    eprintln!("[RUNNER stderr] {l}");
-                }
+            for l in BufReader::new(stderr).lines().map_while(Result::ok) {
+                eprintln!("[RUNNER stderr] {l}");
             }
         });
     }

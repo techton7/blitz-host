@@ -36,6 +36,9 @@ pub fn capture_document_node_png(
             .ok_or_else(|| format!("Target node #{target_id} not found in document"))?;
 
         let pos = node.absolute_position(0.0, 0.0);
+        let vp_scroll = doc.viewport_scroll();
+        let vis_x = pos.x as f64 - vp_scroll.x;
+        let vis_y = pos.y as f64 - vp_scroll.y;
         let size = node.final_layout().size;
 
         if size.width <= 0.0 || size.height <= 0.0 {
@@ -46,8 +49,8 @@ pub fn capture_document_node_png(
         }
 
         // Convert CSS points/pixels to physical buffer pixels
-        let crop_x = (pos.x as f64 * scale).round() as i32;
-        let crop_y = (pos.y as f64 * scale).round() as i32;
+        let crop_x = (vis_x * scale).round() as i32;
+        let crop_y = (vis_y * scale).round() as i32;
         let crop_w = (size.width as f64 * scale).round() as i32;
         let crop_h = (size.height as f64 * scale).round() as i32;
 
@@ -61,8 +64,8 @@ pub fn capture_document_node_png(
 
         if final_w == 0 || final_h == 0 {
             return Err(format!(
-                "Target node #{target_id} has no visible pixels in viewport (bounds: [{}, {}, {}, {}], viewport: {}x{})",
-                pos.x, pos.y, size.width, size.height, width, height
+                "Target node #{target_id} has no visible pixels in viewport (bounds: [{}, {}, {}, {}], viewport: {}x{}, viewport_scroll: [{}, {}])",
+                pos.x, pos.y, size.width, size.height, width, height, vp_scroll.x, vp_scroll.y
             ));
         }
 
@@ -154,21 +157,20 @@ pub fn capture_document(doc: &mut BaseDocument, request: CaptureRequest) -> Capt
     match capture_document_node_png(doc, target_node_id) {
         Ok((width, height, node_id, png_bytes)) => {
             let target_file = std::path::Path::new(&output_path);
-            if let Some(parent) = target_file.parent() {
-                if !parent.as_os_str().is_empty() {
-                    if let Err(e) = std::fs::create_dir_all(parent) {
-                        return CaptureResponse {
-                            success: false,
-                            file_path: output_path,
-                            width: 0,
-                            height: 0,
-                            format: "png".to_string(),
-                            node_id: target_node_id,
-                            bytes: 0,
-                            message: Some(format!("Failed to create parent directory: {e}")),
-                        };
-                    }
-                }
+            if let Some(parent) = target_file.parent()
+                && !parent.as_os_str().is_empty()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                return CaptureResponse {
+                    success: false,
+                    file_path: output_path,
+                    width: 0,
+                    height: 0,
+                    format: "png".to_string(),
+                    node_id: target_node_id,
+                    bytes: 0,
+                    message: Some(format!("Failed to create parent directory: {e}")),
+                };
             }
 
             if let Err(e) = std::fs::write(target_file, &png_bytes) {
@@ -217,5 +219,74 @@ pub fn capture_document(doc: &mut BaseDocument, request: CaptureRequest) -> Capt
             bytes: 0,
             message: Some(err),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blitz_dom::{
+        Attribute, DocumentConfig, QualName, ScrollBehavior, ScrollLogicalPosition, local_name, ns,
+    };
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    fn div(mutator: &mut blitz_dom::DocumentMutator<'_>, style: &str) -> NodeId {
+        mutator.create_element(
+            QualName::new(None, ns!(html), local_name!("div")),
+            vec![Attribute {
+                name: QualName::new(None, ns!(), local_name!("style")),
+                value: style.to_string(),
+            }],
+        )
+    }
+
+    #[test]
+    fn capture_node_below_viewport_requires_scroll_into_view() {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        let root_id = doc.root_node().id;
+        let target = {
+            let mut m = doc.mutate();
+            let spacer = div(&mut m, "display:block;width:100px;height:1000px;");
+            let target = div(
+                &mut m,
+                "display:block;width:120px;height:80px;background:#ff0000;",
+            );
+            let html =
+                m.create_element(QualName::new(None, ns!(html), local_name!("html")), vec![]);
+            let body =
+                m.create_element(QualName::new(None, ns!(html), local_name!("body")), vec![]);
+            m.append_children(root_id, &[html]);
+            m.append_children(html, &[body]);
+            m.append_children(body, &[spacer, target]);
+            target
+        };
+        doc.resolve(0.0);
+
+        let bounds = doc.get_node(target).unwrap().absolute_position(0.0, 0.0);
+        assert!(
+            bounds.y >= 600.0,
+            "bounds {bounds:?}: target must start below the viewport"
+        );
+
+        let err = capture_document_node_png(&mut doc, Some(target.as_u64())).unwrap_err();
+        assert!(err.contains("no visible pixels"), "unexpected error: {err}");
+        assert!(err.contains("viewport_scroll"), "unexpected error: {err}");
+
+        doc.scroll_into_view(
+            target,
+            ScrollBehavior::Instant,
+            ScrollLogicalPosition::Nearest,
+            ScrollLogicalPosition::Nearest,
+        );
+        assert!(doc.viewport_scroll().y > 0.0, "viewport must have scrolled");
+
+        let (w, h, id, png) = capture_document_node_png(&mut doc, Some(target.as_u64()))
+            .expect("capture must succeed after scroll");
+        assert_eq!(id, Some(target.as_u64()));
+        assert_eq!((w, h), (120, 80));
+        assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
     }
 }

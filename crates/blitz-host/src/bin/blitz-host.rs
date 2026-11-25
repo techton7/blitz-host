@@ -20,6 +20,7 @@ SUBCOMMANDS:
     inspect [TARGET] [OPTIONS]     Inspect live window semantic DOM & layout tree (JSON)
     capture [TARGET] -o <FILE>     Capture live visual screenshot or node crop (mandatory -o, JSON)
     focus <TARGET> [OPTIONS]       Focus target element (auto-settles, JSON)
+    scroll-into-view <TARGET> [OPTIONS]  Scroll target element into the viewport (JSON)
     set-value <TARGET> <VALUE>     Set text value of an input element (auto-settles, JSON)
     key <KEY_SPEC> [OPTIONS]       Dispatch key event (e.g. cmd+a, shift+tab, enter) (JSON)
     mouse <SUBCOMMAND> [OPTIONS]   Pointer and mouse interactions (click, move, down, up, wheel, drag) (JSON)
@@ -231,6 +232,35 @@ EXAMPLES:
     blitz-host focus 4294967405
     blitz-host focus "#test-input"
     blitz-host focus --selector "#test-input" --pid 37462
+"##
+    );
+}
+
+fn print_scroll_into_view_help() {
+    println!(
+        r##"blitz-host-scroll-into-view: Scroll a target element into the viewport of a live Blitz window.
+
+USAGE:
+    blitz-host scroll-into-view <TARGET> [OPTIONS] [DESCRIPTOR_PATH]
+
+ARGUMENTS:
+    <TARGET>                 Target element specified by numeric node ID or CSS selector
+    [DESCRIPTOR_PATH]        Path to host descriptor JSON (auto-discovered if omitted)
+
+OPTIONS:
+    --node, -n <NODE_ID>     Target specific node ID
+    --selector, -s <SEL>     Target specific element by CSS selector
+        --pid <PID>          Target specific host process by OS process ID
+        --window <ID>        Target specific window ID (optional, defaults to primary window)
+    -h, --help               Print help information
+
+NOTE:
+    Uses instant, nearest-edge alignment, then settles 2 VSync frames.
+    Returns typed ActionResponse JSON on stdout.
+
+EXAMPLES:
+    blitz-host scroll-into-view "#footer"
+    blitz-host scroll-into-view --node 4294967405 --pid 37462
 "##
     );
 }
@@ -1320,10 +1350,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(target_file) = output_path {
                 let json_str = serde_json::to_string_pretty(&response)?;
                 let bytes = json_str.len();
-                if let Some(parent) = target_file.parent() {
-                    if !parent.as_os_str().is_empty() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
+                if let Some(parent) = target_file.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    let _ = std::fs::create_dir_all(parent);
                 }
                 std::fs::write(&target_file, &json_str).map_err(|e| {
                     std::io::Error::new(
@@ -1527,6 +1557,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 client.descriptor().pid
             );
             let act_res = client.focus_target_with_options(window_id, target, focus_visible_opt)?;
+            let _settle_res = client.settle_window(window_id, 2)?;
+            println!("{}", serde_json::to_string_pretty(&act_res)?);
+            if !act_res.success {
+                if let Some(msg) = &act_res.message {
+                    eprintln!("Error: {msg}");
+                }
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        "scroll-into-view" => {
+            let subargs = &args[2..];
+            if subargs.iter().any(|a| a == "-h" || a == "--help") {
+                print_scroll_into_view_help();
+                return Ok(());
+            }
+
+            let mut positional = Vec::new();
+            let mut skip_next = false;
+            for arg in subargs {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                if arg == "--pid"
+                    || arg == "--window"
+                    || arg == "--window-id"
+                    || arg == "--node"
+                    || arg == "-n"
+                    || arg == "--selector"
+                    || arg == "-s"
+                {
+                    skip_next = true;
+                    continue;
+                }
+                if arg.starts_with('-') || is_explicit_descriptor_or_socket(arg) {
+                    continue;
+                }
+                positional.push(arg.as_str());
+            }
+
+            let target = parse_target_flag(subargs)
+                .or_else(|| positional.first().map(|s| ElementTarget::from(*s)));
+            let Some(target) = target else {
+                eprintln!(
+                    "Error: 'scroll-into-view' requires a target <TARGET> argument (node ID or CSS selector)."
+                );
+                eprintln!("Run 'blitz-host scroll-into-view --help' for usage.");
+                std::process::exit(1);
+            };
+
+            let window_id = parse_window_arg(subargs);
+            let selector = determine_selector(subargs);
+            let mut client = connect_cli_client(&selector);
+
+            eprintln!(
+                "Dispatching scroll-into-view action to target '{}' (PID: {})...",
+                target,
+                client.descriptor().pid
+            );
+            let act_res = client.scroll_into_view(window_id, target)?;
             let _settle_res = client.settle_window(window_id, 2)?;
             println!("{}", serde_json::to_string_pretty(&act_res)?);
             if !act_res.success {
